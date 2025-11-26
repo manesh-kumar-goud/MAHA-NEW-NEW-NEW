@@ -3,8 +3,9 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
+import os
 
-from pydantic import Field, validator
+from pydantic import Field, validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,16 +57,26 @@ class Settings(BaseSettings):
         extra="ignore"
     )
     
-    @validator("google_service_account_file")
-    def validate_service_account_file(cls, v, values):
-        """Validate service account file exists (if not using JSON env var)"""
-        # If JSON is provided via env var, file validation is skipped
-        if values.get("google_service_account_json"):
-            return v  # Return as-is, file not needed
-        # Only validate file existence if JSON is not provided
-        if v and not Path(v).exists():
-            raise ValueError(f"Service account file not found: {v}. Either provide the file or set GOOGLE_SERVICE_ACCOUNT_JSON env var.")
-        return v
+    @model_validator(mode='after')
+    def validate_service_account(self):
+        """Validate service account - either JSON env var or file must be provided"""
+        # Check if JSON env var is set (even if not in values yet)
+        json_from_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or self.google_service_account_json
+        
+        # If JSON is provided, file is not needed
+        if json_from_env:
+            # Clear file path if JSON is provided
+            self.google_service_account_file = None
+            return self
+        
+        # If no JSON, file must exist
+        if not self.google_service_account_file or not Path(self.google_service_account_file).exists():
+            raise ValueError(
+                "Either GOOGLE_SERVICE_ACCOUNT_JSON env var or google_service_account_file must be provided. "
+                f"File not found: {self.google_service_account_file}"
+            )
+        
+        return self
     
     @validator("supabase_url")
     def validate_supabase_url(cls, v):
