@@ -1,0 +1,27 @@
+# Core FastAPI dependencies
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+
+# Database
+supabase==2.4.0
+httpx==0.25.2
+gotrue==2.8.0
+
+# Data validation
+pydantic==2.8.2
+pydantic-core==2.20.1
+pydantic-settings==2.3.4
+
+# Environment
+python-dotenv==1.0.1
+
+# Web scraping
+requests==2.31.0
+beautifulsoup4==4.12.3
+
+# Google Sheets
+gspread==6.0.2
+google-auth==2.34.0
+
+# Utilities
+tenacity==9.0.0

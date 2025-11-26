@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Secrets
+service-account.json
+*.pem
+*.key
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.ps1
+test_*.py
+*_test.py
+*.log
+smart_startup.log
+
+# Documentation (keep only README.md)
+AUTOMATION_GUIDE.md
+COMPLETION_BEHAVIOR.md
+DEPLOYMENT_CHECKLIST.md
+DEPLOYMENT_READY.md
+DEPLOYMENT.md
+DIGIT_RANGE_IMPLEMENTATION.md
+FINAL_SYSTEM_CHECK.md
+FIX_GOOGLE_SHEETS_API.md
+GOOGLE_SHEETS_SETUP.md
+QUICK_START.md
+STATUS_SYSTEM_UPDATE.md
+SYSTEM_STATUS.md
+
+# Diagnostic/fix scripts
+diagnose_*.py
+fix_*.py
+cleanup_for_railway.py
+
+# Duplicate/old files
+start_automation.py
+run_automated_backend.ps1
+smart_startup.py
+
