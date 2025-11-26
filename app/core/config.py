@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     
     # Google Sheets
     google_service_account_file: Optional[str] = Field(
-        default="./service-account.json",
-        description="Path to Google service account JSON file"
+        default=None,
+        description="Path to Google service account JSON file (optional if GOOGLE_SERVICE_ACCOUNT_JSON is set)"
     )
     google_service_account_json: Optional[str] = Field(
         default=None,
@@ -59,11 +59,12 @@ class Settings(BaseSettings):
     @validator("google_service_account_file")
     def validate_service_account_file(cls, v, values):
         """Validate service account file exists (if not using JSON env var)"""
-        # If JSON is provided via env var, file is optional
+        # If JSON is provided via env var, file validation is skipped
         if values.get("google_service_account_json"):
-            return v  # File not needed if JSON provided
+            return v  # Return as-is, file not needed
+        # Only validate file existence if JSON is not provided
         if v and not Path(v).exists():
-            raise ValueError(f"Service account file not found: {v}")
+            raise ValueError(f"Service account file not found: {v}. Either provide the file or set GOOGLE_SERVICE_ACCOUNT_JSON env var.")
         return v
     
     @validator("supabase_url")
