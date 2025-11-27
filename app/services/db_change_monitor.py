@@ -25,8 +25,6 @@ class DatabaseChangeMonitor:
         self.automation_service = automation_service
         self.check_interval = check_interval
         self.running = False
-        self.last_check_time = None
-        self.last_prefix_count = 0
         self.last_pending_count = 0
         
     async def start_monitoring(self):
@@ -60,89 +58,50 @@ class DatabaseChangeMonitor:
                 await asyncio.sleep(self.check_interval)
     
     async def _get_current_state(self) -> dict:
-        """Get current state of prefix_metadata table"""
+        """Get current state of prefix_metadata table - simple check for PENDING"""
         try:
-            # Get all prefixes
-            result = self.client.table("prefix_metadata").select("*").execute()
-            all_prefixes = result.data or []
-            
-            # Count by status
-            pending_count = sum(1 for p in all_prefixes if p.get("status") == "pending")
-            not_started_count = sum(1 for p in all_prefixes if p.get("status") == "not_started")
-            completed_count = sum(1 for p in all_prefixes if p.get("status") == "completed")
-            
-            # Get last updated timestamp
-            last_updated = None
-            for prefix in all_prefixes:
-                updated_at = prefix.get("updated_at")
-                if updated_at:
-                    try:
-                        # Parse ISO format timestamp
-                        dt = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
-                        if last_updated is None or dt > last_updated:
-                            last_updated = dt
-                    except:
-                        pass
+            # Get only PENDING prefixes
+            result = self.client.table("prefix_metadata").select("prefix,status").eq("status", "pending").execute()
+            pending_prefixes = result.data or []
             
             state = {
-                "total_count": len(all_prefixes),
-                "pending_count": pending_count,
-                "not_started_count": not_started_count,
-                "completed_count": completed_count,
-                "last_updated": last_updated,
-                "check_time": datetime.now(timezone.utc)
+                "pending_count": len(pending_prefixes)
             }
             
-            self.last_check_time = state["check_time"]
             return state
             
         except Exception as e:
             logger.error(f"Error getting current state: {e}")
             return {
-                "total_count": 0,
-                "pending_count": 0,
-                "not_started_count": 0,
-                "completed_count": 0,
-                "last_updated": None,
-                "check_time": datetime.now(timezone.utc)
+                "pending_count": 0
             }
     
     def _detect_changes(self, current_state: dict) -> bool:
-        """Detect if there are meaningful changes"""
+        """Detect if there are PENDING prefixes to process"""
         
-        # First check - no previous state
-        if self.last_prefix_count == 0:
-            self.last_prefix_count = current_state["total_count"]
-            self.last_pending_count = current_state["pending_count"]
+        # Simple check: if there are PENDING prefixes and automation is not running
+        pending_count = current_state.get("pending_count", 0)
+        
+        # First check - initialize
+        if self.last_pending_count == 0 and pending_count == 0:
+            self.last_pending_count = 0
             return False
         
-        # Check for changes
-        changes_detected = False
-        
-        # 1. New prefixes added
-        if current_state["total_count"] > self.last_prefix_count:
-            logger.info(f"📊 New prefixes detected: {current_state['total_count']} (was {self.last_prefix_count})")
-            changes_detected = True
-        
-        # 2. Pending count changed (status changed)
-        if current_state["pending_count"] != self.last_pending_count:
-            logger.info(f"📊 Pending count changed: {current_state['pending_count']} (was {self.last_pending_count})")
-            changes_detected = True
-        
-        # 3. Recent updates (within last check interval)
-        if current_state["last_updated"]:
-            if self.last_check_time:
-                time_since_update = (self.last_check_time - current_state["last_updated"]).total_seconds()
-                # If update happened within last check interval, it's a change
-                if abs(time_since_update) < self.check_interval * 2:
-                    logger.info(f"📊 Recent database update detected (within last {self.check_interval * 2}s)")
-                    changes_detected = True
+        # If pending count changed or there are pending prefixes and automation not running
+        if pending_count != self.last_pending_count:
+            if pending_count > 0:
+                logger.info(f"📊 Found {pending_count} PENDING prefixes")
+                self.last_pending_count = pending_count
+                return True
         
         # Update last known state
-        self.last_prefix_count = current_state["total_count"]
-        self.last_pending_count = current_state["pending_count"]
+        self.last_pending_count = pending_count
         
-        return changes_detected
+        # If automation is not running and there are pending prefixes, restart
+        if pending_count > 0 and not self.automation_service.running:
+            return True
+        
+        return False
     
     async def _restart_automation(self):
         """Restart the automation service"""

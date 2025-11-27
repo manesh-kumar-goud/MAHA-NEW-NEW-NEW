@@ -113,8 +113,7 @@ class SequentialAutomationService:
                 
                 # Mark it as PENDING when we start processing
                 self.client.table("prefix_metadata").update({
-                    "status": PrefixStatus.PENDING.value,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
+                    "status": PrefixStatus.PENDING.value
                 }).eq("prefix", prefix).execute()
                 
                 logger.info(f"Marked {prefix} as PENDING (started processing)")
@@ -211,7 +210,7 @@ class SequentialAutomationService:
             if final_config:
                 if final_config.last_number >= max_number:
                     logger.info(f"Completed prefix {prefix} - reached maximum: {final_config.last_number}/{max_number}")
-                    await self._mark_prefix_status(prefix, PrefixStatus.COMPLETED, f"Completed - reached max for {digits} digits ({max_number})")
+                    await self._mark_prefix_status(prefix, PrefixStatus.COMPLETED)
                 elif not self.running:
                     logger.info(f"Processing stopped for {prefix} at {final_config.last_number}")
             else:
@@ -250,8 +249,7 @@ class SequentialAutomationService:
                             prefix=prefix,
                             serial_number=id_result.serial_number,
                             generated_id=id_result.generated_id,
-                            mobile_number=mobile_number,
-                            timestamp=datetime.now(timezone.utc)
+                            mobile_number=mobile_number
                         )
                         logger.info(f"Logged to sheets: {sheet_range}")
                     else:
@@ -277,8 +275,7 @@ class SequentialAutomationService:
         
         try:
             self.client.table("prefix_metadata").update({
-                "last_number": serial_number,  # This is already updated by ID generator
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "last_number": serial_number  # This is already updated by ID generator
             }).eq("prefix", prefix).execute()
             
             logger.debug(f"📝 Updated last_extracted for {prefix}: {serial_number}")
@@ -286,21 +283,17 @@ class SequentialAutomationService:
         except Exception as e:
             logger.error(f"❌ Error updating last_extracted for {prefix}: {e}")
     
-    async def _mark_prefix_status(self, prefix: str, status: PrefixStatus, remarks: str = None):
-        """Mark prefix with specific status and optional remarks"""
+    async def _mark_prefix_status(self, prefix: str, status: PrefixStatus):
+        """Mark prefix with specific status"""
         
         try:
             update_data = {
-                "status": status.value,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "status": status.value
             }
-            
-            if remarks:
-                update_data["remarks"] = remarks
             
             self.client.table("prefix_metadata").update(update_data).eq("prefix", prefix).execute()
             
-            logger.info(f"📝 Marked {prefix} as {status.value}" + (f" - {remarks}" if remarks else ""))
+            logger.info(f"📝 Marked {prefix} as {status.value}")
             
         except Exception as e:
             logger.error(f"❌ Error marking {prefix} status: {e}")
@@ -314,9 +307,7 @@ class SequentialAutomationService:
         if self.current_prefix:
             try:
                 self.client.table("prefix_metadata").update({
-                    "status": PrefixStatus.PENDING.value,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "remarks": "Stopped by user"
+                    "status": PrefixStatus.PENDING.value
                 }).eq("prefix", self.current_prefix).execute()
                 
                 logger.info(f"Marked {self.current_prefix} as PENDING (was interrupted)")

@@ -87,7 +87,6 @@ class GoogleSheetsService:
         serial_number: int,
         generated_id: str,
         mobile_number: Optional[str],
-        timestamp: datetime,
         sheet_id: Optional[str] = None
     ) -> str:
         """Log result to Google Sheets - ONLY if mobile number is found"""
@@ -117,7 +116,6 @@ class GoogleSheetsService:
             row_data = [
                 serial_number,
                 generated_id,
-                timestamp.isoformat(),
                 mobile_number  # We know this is valid at this point
             ]
             
@@ -127,7 +125,7 @@ class GoogleSheetsService:
             
             # Calculate range
             row_count = len(worksheet.get_all_values())
-            range_notation = f"{prefix}!A{row_count}:D{row_count}"
+            range_notation = f"{prefix}!A{row_count}:C{row_count}"
             
             logger.info(f"✅ Successfully logged to Google Sheets range: {range_notation}")
             return range_notation
@@ -162,17 +160,17 @@ class GoogleSheetsService:
                 )
                 logger.info(f"✅ Worksheet created: {worksheet_name}")
                 
-                # Add headers
-                headers = ["Serial", "Generated ID", "Timestamp", "Mobile Number"]
-                worksheet.append_row(headers, value_input_option="USER_ENTERED")
-                logger.info(f"✅ Headers added: {headers}")
-                
-                # Format headers (make bold)
-                try:
-                    worksheet.format("A1:D1", {"textFormat": {"bold": True}})
-                    logger.info(f"✅ Headers formatted (bold)")
-                except Exception as format_error:
-                    logger.warning(f"⚠️  Could not format headers: {format_error}")
+            # Add headers
+            headers = ["Serial", "Generated ID", "Mobile Number"]
+            worksheet.append_row(headers, value_input_option="USER_ENTERED")
+            logger.info(f"✅ Headers added: {headers}")
+            
+            # Format headers (make bold)
+            try:
+                worksheet.format("A1:C1", {"textFormat": {"bold": True}})
+                logger.info(f"✅ Headers formatted (bold)")
+            except Exception as format_error:
+                logger.warning(f"⚠️  Could not format headers: {format_error}")
                 
                 logger.info(f"✅ Worksheet '{worksheet_name}' ready with headers")
                 return worksheet

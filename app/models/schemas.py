@@ -32,9 +32,6 @@ class PrefixConfigResponse(BaseModel):
     last_number: int
     has_space: bool
     status: PrefixStatus
-    remarks: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
 
 
 class GenerateIDResponse(BaseModel):
@@ -43,7 +40,6 @@ class GenerateIDResponse(BaseModel):
     prefix: str
     serial_number: int
     mobile_number: Optional[str] = None
-    timestamp: datetime
     status: OperationStatus
     sheet_range: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -62,7 +58,6 @@ class ScrapeResult(BaseModel):
 class HealthResponse(BaseModel):
     """Health check response"""
     status: str = "healthy"
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
     version: str = "2.0.0"
     services: Dict[str, bool] = Field(default_factory=dict)
 
@@ -71,7 +66,6 @@ class ErrorResponse(BaseModel):
     """Error response"""
     error: str
     detail: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
     request_id: Optional[str] = None
 
 
@@ -83,9 +77,6 @@ class PrefixConfig(BaseModel):
     last_number: int
     has_space: bool
     status: PrefixStatus
-    remarks: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
 
     @validator('prefix')
     def validate_prefix(cls, v):
@@ -103,7 +94,6 @@ class SerialLogEntry(BaseModel):
     mobile_number: Optional[str]
     status: OperationStatus
     metadata: Optional[Dict[str, Any]] = None
-    created_at: datetime
 
 
 class IDGenerationResult(BaseModel):

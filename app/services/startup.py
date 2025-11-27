@@ -42,8 +42,7 @@ class StartupService:
                 from app.core.database import get_supabase_client
                 client = get_supabase_client()
                 client.table("prefix_metadata").update({
-                    "status": PrefixStatus.PENDING.value,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
+                    "status": PrefixStatus.PENDING.value
                 }).eq("prefix", prefix_data.get("prefix")).execute()
                 # Update in memory for processing
                 prefix_data["status"] = "pending"
@@ -96,6 +95,22 @@ class StartupService:
         
         resume_summary["total_prefixes_to_automate"] = len(prefixes_to_automate)
         
+        # Ensure Google Sheets worksheets exist for all prefixes
+        try:
+            from app.services.sheets import GoogleSheetsService
+            sheets_service = GoogleSheetsService()
+            
+            # Get all prefix names
+            all_prefix_names = [p.prefix for p in (pending_prefixes + not_started_prefixes + completed_prefixes)]
+            
+            if all_prefix_names:
+                logger.info(f"📊 Ensuring Google Sheets worksheets exist for {len(all_prefix_names)} prefixes...")
+                sheet_results = sheets_service.create_worksheets_for_all_prefixes(all_prefix_names)
+                logger.info(f"✅ Sheets check complete: {len(sheet_results['created'])} created, {len(sheet_results['existing'])} existing")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not create/verify Google Sheets worksheets: {e}")
+            # Continue anyway - sheets will be created when needed
+        
         # Start automation if we have prefixes to process
         if prefixes_to_automate:
             logger.info(f"Starting automation for {len(prefixes_to_automate)} prefixes")
@@ -136,39 +151,24 @@ class StartupService:
         """Resume a RUNNING prefix"""
         logger.info(f"Resuming RUNNING prefix: {config.prefix} (last_number: {config.last_number})")
         
-        # Update timestamp to show it's being resumed
-        try:
-            self.client.table("prefix_metadata").update({
-                "remarks": f"Resumed at startup - last: {config.last_number}",
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }).eq("prefix", config.prefix).execute()
-        except Exception as e:
-            logger.error(f"Failed to update running prefix {config.prefix}: {e}")
+        # No update needed - status already set
+        pass
     
     async def _start_pending_prefix(self, config: PrefixConfig):
         """Start a PENDING prefix"""
         logger.info(f"Starting PENDING prefix: {config.prefix} (will start from: {config.last_number + 1})")
         
-        # Update status to RUNNING
-        try:
-            self.client.table("prefix_metadata").update({
-                "status": PrefixStatus.PENDING.value,
-                "remarks": f"Auto-started at startup - from: {config.last_number + 1}",
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }).eq("prefix", config.prefix).execute()
-        except Exception as e:
-            logger.error(f"Failed to start pending prefix {config.prefix}: {e}")
+        # Status already PENDING, no update needed
+        pass
     
     async def _reset_error_prefix(self, config: PrefixConfig):
         """Reset an ERROR prefix to PENDING"""
-        logger.info(f"Resetting ERROR prefix: {config.prefix} (remarks: {config.remarks})")
+        logger.info(f"Resetting ERROR prefix: {config.prefix} to PENDING")
         
         # Reset to PENDING status
         try:
             self.client.table("prefix_metadata").update({
-                "status": PrefixStatus.PENDING.value,
-                "remarks": f"Auto-reset from ERROR at startup - previous: {config.remarks}",
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "status": PrefixStatus.PENDING.value
             }).eq("prefix", config.prefix).execute()
         except Exception as e:
             logger.error(f"Failed to reset error prefix {config.prefix}: {e}")
@@ -201,9 +201,7 @@ class StartupService:
                 "status": config.status.value,
                 "last_number": config.last_number,
                 "digits": config.digits,
-                "has_space": config.has_space,
-                "remarks": config.remarks,
-                "updated_at": config.updated_at
+                "has_space": config.has_space
             })
         
         return summary
@@ -220,9 +218,7 @@ class StartupService:
             if completed_prefixes:
                 # Update all to PENDING
                 self.client.table("prefix_metadata").update({
-                    "status": PrefixStatus.PENDING.value,
-                    "remarks": "Reset to PENDING for new automation cycle",
-                    "updated_at": datetime.now(timezone.utc).isoformat()
+                    "status": PrefixStatus.PENDING.value
                 }).eq("status", PrefixStatus.COMPLETED.value).execute()
                 
                 logger.info(f"Marked {len(completed_prefixes)} prefixes as PENDING: {completed_prefixes}")

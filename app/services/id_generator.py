@@ -106,8 +106,7 @@ class IDGeneratorService:
                 "last_number": new_number,
                 "digits": digits or current["digits"],
                 "has_space": has_space if has_space is not None else current["has_space"],
-                "status": PrefixStatus.PENDING.value,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "status": PrefixStatus.PENDING.value
             }).eq("prefix", prefix).execute()
             
             return PrefixConfig(**updated.data[0])
@@ -118,9 +117,7 @@ class IDGeneratorService:
                 "digits": digits or 5,
                 "last_number": 1,
                 "has_space": has_space if has_space is not None else True,
-                "status": PrefixStatus.PENDING.value,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "status": PrefixStatus.PENDING.value
             }
             
             created = self.client.table(self.table_name).insert(new_config).execute()
@@ -145,16 +142,13 @@ class IDGeneratorService:
     def update_prefix_status(
         self, 
         prefix: str, 
-        status: PrefixStatus, 
-        remarks: Optional[str] = None
+        status: PrefixStatus
     ) -> PrefixConfig:
         """Update prefix status"""
         prefix = prefix.strip().upper()
         
         updated = self.client.table(self.table_name).update({
-            "status": status.value,
-            "remarks": remarks,
-            "updated_at": datetime.now(timezone.utc).isoformat()
+            "status": status.value
         }).eq("prefix", prefix).execute()
         
         if not updated.data:
@@ -177,8 +171,7 @@ class IDGeneratorService:
             "generated_id": generated_id,
             "mobile": mobile_number,
             "status": status,
-            "extra": metadata or {},
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "extra": metadata or {}
         }
         
         result = self.client.table(self.log_table).insert(log_entry).execute()

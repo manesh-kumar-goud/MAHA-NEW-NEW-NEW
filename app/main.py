@@ -292,8 +292,7 @@ def create_app() -> FastAPI:
             return JSONResponse(
                 status_code=exc.status_code,
                 content=ErrorResponse(
-                    error=exc.detail,
-                    timestamp=datetime.now(timezone.utc)
+                    error=exc.detail
                 ).dict()
             )
     else:
@@ -301,7 +300,7 @@ def create_app() -> FastAPI:
         async def http_exception_handler(request, exc):
             return JSONResponse(
                 status_code=exc.status_code,
-                content={"error": exc.detail, "timestamp": datetime.now(timezone.utc).isoformat()}
+                content={"error": exc.detail}
             )
     
     return app

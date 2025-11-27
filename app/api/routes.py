@@ -86,7 +86,6 @@ async def generate_id(
             has_space=request.has_space
         )
         
-        timestamp = datetime.now(timezone.utc)
         mobile_number = None
         metadata = {}
         status = OperationStatus.SUCCESS
@@ -123,7 +122,6 @@ async def generate_id(
                     serial_number=id_result.serial_number,
                     generated_id=id_result.generated_id,
                     mobile_number=mobile_number,
-                    timestamp=timestamp,
                     sheet_id=request.sheet_id
                 )
                 metadata["sheets"] = {"range": sheet_range}
@@ -152,14 +150,12 @@ async def generate_id(
         if status == OperationStatus.FAILED:
             id_generator.update_prefix_status(
                 prefix, 
-                PrefixStatus.ERROR, 
-                "Generation failed"
+                PrefixStatus.ERROR
             )
         elif mobile_number:
             id_generator.update_prefix_status(
                 prefix, 
-                PrefixStatus.COMPLETED, 
-                "Mobile number found"
+                PrefixStatus.COMPLETED
             )
         
         return GenerateIDResponse(
@@ -167,7 +163,6 @@ async def generate_id(
             prefix=prefix,
             serial_number=id_result.serial_number,
             mobile_number=mobile_number,
-            timestamp=timestamp,
             status=status,
             sheet_range=sheet_range,
             metadata=metadata
@@ -213,10 +208,7 @@ async def get_prefix_status(
         digits=config.digits,
         last_number=config.last_number,
         has_space=config.has_space,
-        status=config.status,
-        remarks=config.remarks,
-        created_at=config.created_at or datetime.now(timezone.utc),
-        updated_at=config.updated_at or datetime.now(timezone.utc)
+        status=config.status
     )
 
 
@@ -242,9 +234,7 @@ async def reset_prefix(
         # Update last_number to starting_number - 1 so next generation gives starting_number
         updated_config = id_generator.client.table("prefix_metadata").update({
             "last_number": starting_number,
-            "status": PrefixStatus.PENDING.value,
-            "remarks": f"Reset to {starting_number}",
-            "updated_at": datetime.now(timezone.utc).isoformat()
+            "status": PrefixStatus.PENDING.value
         }).eq("prefix", prefix).execute()
         
         return {
