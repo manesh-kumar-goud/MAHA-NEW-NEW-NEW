@@ -5,6 +5,7 @@ This script fixes all issues and runs the complete system
 """
 
 import asyncio
+import gc
 import logging
 import sys
 import os
@@ -36,7 +37,6 @@ async def main():
     try:
         # Import services
         from app.services.startup import StartupService
-        from app.services.automation import AutomationService
         
         print("+ Services imported successfully")
         
@@ -87,6 +87,11 @@ async def main():
             while True:
                 await asyncio.sleep(30)  # Print stats every 30 seconds
                 iteration += 1
+                
+                # Periodic memory cleanup for Render free tier (every 10 minutes)
+                if iteration % 20 == 0:
+                    gc.collect()
+                    logger.debug("Periodic memory cleanup")
                 
                 if automation_service.running:
                     stats = automation_service.get_stats()

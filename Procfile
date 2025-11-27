@@ -1,2 +1,2 @@
-web: python run_complete_system.py
+worker: python run_complete_system.py
 

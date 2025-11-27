@@ -18,6 +18,7 @@ class StartupService:
     def __init__(self):
         self.client = get_supabase_client()
         self.automation_service = SequentialAutomationService()
+        self.automation_task = None  # Store task reference
     
     async def check_and_resume_automation(self) -> Dict:
         """Check database for running/pending prefixes and resume automation"""
@@ -102,13 +103,20 @@ class StartupService:
             
             # Start sequential automation (will automatically pick up prefixes from database)
             # It will process PENDING first, then NOT_STARTED
-            import asyncio
-            asyncio.create_task(
-                self.automation_service.start_sequential_processing(
-                    generation_interval=5  # 5 seconds between generations
-                    # Max IDs calculated automatically from digit count
+            # Only start if not already running
+            if not self.automation_service.running:
+                import asyncio
+                task = asyncio.create_task(
+                    self.automation_service.start_sequential_processing(
+                        generation_interval=5  # 5 seconds between generations
+                        # Max IDs calculated automatically from digit count
+                    )
                 )
-            )
+                # Store task reference to prevent garbage collection
+                self.automation_task = task
+                logger.info("Automation task created and started")
+            else:
+                logger.info("Automation already running, skipping start")
             
         else:
             logger.info("No prefixes require automation at startup")

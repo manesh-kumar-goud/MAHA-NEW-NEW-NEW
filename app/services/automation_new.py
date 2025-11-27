@@ -1,7 +1,9 @@
 """Sequential automation service - processes one prefix at a time"""
 
 import asyncio
+import gc
 import logging
+import traceback
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -51,32 +53,44 @@ class SequentialAutomationService:
         
         try:
             while self.running:
-                # Get the next prefix to process
-                current_prefix = await self._get_next_prefix_to_process()
-                
-                if current_prefix:
-                    self.current_prefix = current_prefix
-                    self.stats["current_prefix"] = current_prefix
+                try:
+                    # Get the next prefix to process
+                    current_prefix = await self._get_next_prefix_to_process()
                     
-                    logger.info(f"🎯 Processing prefix: {current_prefix}")
-                    
-                    # Process this prefix until completion
-                    await self._process_prefix_until_completion(
-                        current_prefix, 
-                        generation_interval
-                    )
-                    
-                else:
-                    logger.info("⏸️  No prefixes to process, waiting...")
+                    if current_prefix:
+                        self.current_prefix = current_prefix
+                        self.stats["current_prefix"] = current_prefix
+                        
+                        logger.info(f"🎯 Processing prefix: {current_prefix}")
+                        
+                        # Process this prefix until completion
+                        await self._process_prefix_until_completion(
+                            current_prefix, 
+                            generation_interval
+                        )
+                        
+                    else:
+                        logger.info("⏸️  No prefixes to process, waiting...")
+                        await asyncio.sleep(generation_interval)
+                        
+                except Exception as e:
+                    # Handle individual iteration errors - don't stop the whole service
+                    logger.error(f"Error in automation loop iteration: {e}")
+                    logger.error(traceback.format_exc())
+                    # Wait before retrying
                     await asyncio.sleep(generation_interval)
+                    # Continue running - don't break the loop
                     
         except Exception as e:
-            logger.error(f"Sequential processing error: {e}")
+            # Only log fatal errors - don't raise to keep service running
+            logger.error(f"Fatal error in sequential processing: {e}")
+            logger.error(traceback.format_exc())
             self.running = False
-            raise
+            # Don't raise - let the service stop gracefully and be restarted
         finally:
             self.current_prefix = None
             self.stats["current_prefix"] = None
+            logger.info("Sequential processing loop ended")
     
     async def _get_next_prefix_to_process(self) -> Optional[str]:
         """Get the next prefix to process - PENDING first, then NOT_STARTED"""
@@ -163,6 +177,11 @@ class SequentialAutomationService:
                             current_number = prefix_config.last_number
                             remaining = max_number - current_number
                             logger.info(f"Progress: {current_number}/{max_number} (remaining: {remaining})")
+                        
+                        # Periodic memory cleanup for free tier (every 50 IDs)
+                        if current_number % 50 == 0:
+                            gc.collect()
+                            logger.debug("Memory cleanup performed")
                     else:
                         consecutive_errors += 1
                         logger.warning(f"Error count: {consecutive_errors}/{max_consecutive_errors}")

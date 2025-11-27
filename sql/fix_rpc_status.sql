@@ -33,9 +33,9 @@ BEGIN
     -- If not exists, create it
     IF NOT FOUND THEN
         INSERT INTO public.prefix_metadata (
-            prefix, digits, last_number, has_space, status, created_at, updated_at
+            prefix, digits, last_number, has_space, status, updated_at
         ) VALUES (
-            p_prefix, p_digits, 0, p_has_space, 'pending', NOW(), NOW()
+            p_prefix, p_digits, 0, p_has_space, 'pending', NOW()
         )
         RETURNING * INTO v_current_record;
     END IF;
@@ -53,17 +53,18 @@ BEGIN
         updated_at = NOW()
     WHERE public.prefix_metadata.prefix = p_prefix;
     
-    -- Return updated record
+    -- Return updated record - query fresh from table to get actual updated_at
+    -- Note: created_at doesn't exist in table, so use NOW() as default
     RETURN QUERY
     SELECT 
         pm.prefix,
-        COALESCE(p_digits, v_current_record.digits),
+        COALESCE(p_digits, pm.digits),
         v_new_number,
-        COALESCE(p_has_space, v_current_record.has_space),
+        COALESCE(p_has_space, pm.has_space),
         'pending'::text,  -- Always return 'pending'
         pm.remarks,
-        pm.created_at,
-        NOW()
+        NOW() as created_at,  -- Use NOW() since created_at doesn't exist in table
+        pm.updated_at
     FROM public.prefix_metadata pm
     WHERE pm.prefix = p_prefix;
 END;

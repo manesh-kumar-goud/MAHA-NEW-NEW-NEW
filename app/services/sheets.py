@@ -35,9 +35,14 @@ class GoogleSheetsService:
                 if json_from_env or json_from_settings:
                     import json
                     service_account_json = json_from_env or json_from_settings
-                    service_account_info = json.loads(service_account_json)
-                    self._client = gspread.service_account_from_dict(service_account_info)
-                    logger.info("Google Sheets client initialized from JSON env var")
+                    try:
+                        service_account_info = json.loads(service_account_json)
+                        self._client = gspread.service_account_from_dict(service_account_info)
+                        logger.info("Google Sheets client initialized from JSON env var")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Invalid JSON in GOOGLE_SERVICE_ACCOUNT_JSON: {e}")
+                        logger.error(f"JSON length: {len(service_account_json) if service_account_json else 0} characters")
+                        raise ValueError(f"Invalid JSON format in GOOGLE_SERVICE_ACCOUNT_JSON: {e}")
                 elif self.settings.google_service_account_file:
                     from pathlib import Path
                     file_path = Path(self.settings.google_service_account_file)
