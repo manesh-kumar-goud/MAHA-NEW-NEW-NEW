@@ -94,20 +94,24 @@ class GoogleSheetsService:
         
         # Only log if mobile number was found
         if not mobile_number or mobile_number.strip() == "" or mobile_number == "N/A":
-            logger.info(f"Skipping Google Sheets logging for {generated_id} - no mobile number found")
+            logger.info(f"📝 Skipping Google Sheets logging for {generated_id} - no mobile number found")
             return f"SKIPPED_{prefix}_{serial_number}"  # Return indicator that it was skipped
         
-        logger.info(f"Logging result for {generated_id} with mobile {mobile_number} to Google Sheets")
+        logger.info(f"📊 Logging result for {generated_id} with mobile {mobile_number} to Google Sheets")
         
         try:
             # Use override sheet if provided
             if sheet_id:
                 spreadsheet = self.client.open_by_key(sheet_id)
+                logger.info(f"Using custom sheet ID: {sheet_id}")
             else:
                 spreadsheet = self.spreadsheet
+                logger.info(f"Using default spreadsheet: {spreadsheet.title}")
             
             # Get or create worksheet for this prefix
+            logger.info(f"Getting/creating worksheet for prefix: {prefix}")
             worksheet = self._get_or_create_worksheet(spreadsheet, prefix)
+            logger.info(f"✅ Worksheet ready: {worksheet.title}")
             
             # Prepare row data - only for valid results with mobile numbers
             row_data = [
@@ -117,6 +121,7 @@ class GoogleSheetsService:
                 mobile_number  # We know this is valid at this point
             ]
             
+            logger.info(f"Appending row to worksheet: {row_data}")
             # Append row
             worksheet.append_row(row_data, value_input_option="USER_ENTERED")
             
@@ -124,11 +129,13 @@ class GoogleSheetsService:
             row_count = len(worksheet.get_all_values())
             range_notation = f"{prefix}!A{row_count}:D{row_count}"
             
-            logger.info(f"Successfully logged to range: {range_notation}")
+            logger.info(f"✅ Successfully logged to Google Sheets range: {range_notation}")
             return range_notation
             
         except Exception as e:
-            logger.error(f"Failed to log to Google Sheets: {e}")
+            logger.error(f"❌ Failed to log to Google Sheets: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise
     
     def _get_or_create_worksheet(self, spreadsheet, prefix: str):
@@ -140,28 +147,39 @@ class GoogleSheetsService:
         try:
             # Try to get existing worksheet
             worksheet = spreadsheet.worksheet(worksheet_name)
-            logger.debug(f"Found existing worksheet: {worksheet_name}")
+            logger.info(f"✅ Found existing worksheet: {worksheet_name} (rows: {worksheet.row_count})")
             return worksheet
             
         except WorksheetNotFound:
             # Create new worksheet
-            logger.info(f"Creating new worksheet: {worksheet_name}")
+            logger.info(f"📝 Creating new worksheet: {worksheet_name}")
             
-            worksheet = spreadsheet.add_worksheet(
-                title=worksheet_name,
-                rows=1000,
-                cols=10
-            )
-            
-            # Add headers
-            headers = ["Serial", "Generated ID", "Timestamp", "Mobile Number"]
-            worksheet.append_row(headers, value_input_option="USER_ENTERED")
-            
-            # Format headers (make bold)
-            worksheet.format("A1:D1", {"textFormat": {"bold": True}})
-            
-            logger.info(f"Created worksheet with headers: {worksheet_name}")
-            return worksheet
+            try:
+                worksheet = spreadsheet.add_worksheet(
+                    title=worksheet_name,
+                    rows=1000,
+                    cols=10
+                )
+                logger.info(f"✅ Worksheet created: {worksheet_name}")
+                
+                # Add headers
+                headers = ["Serial", "Generated ID", "Timestamp", "Mobile Number"]
+                worksheet.append_row(headers, value_input_option="USER_ENTERED")
+                logger.info(f"✅ Headers added: {headers}")
+                
+                # Format headers (make bold)
+                try:
+                    worksheet.format("A1:D1", {"textFormat": {"bold": True}})
+                    logger.info(f"✅ Headers formatted (bold)")
+                except Exception as format_error:
+                    logger.warning(f"⚠️  Could not format headers: {format_error}")
+                
+                logger.info(f"✅ Worksheet '{worksheet_name}' ready with headers")
+                return worksheet
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to create worksheet '{worksheet_name}': {e}")
+                raise
     
     def health_check(self) -> bool:
         """Check if Google Sheets service is healthy"""

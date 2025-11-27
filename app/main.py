@@ -81,23 +81,36 @@ async def lifespan(app: FastAPI):
             async def start():
                 try:
                     from app.services.startup import StartupService
+                    from app.services.db_change_monitor import DatabaseChangeMonitor
+                    
                     startup = StartupService()
                     app.state.startup_service = startup
+                    automation_service = startup.automation_service
+                    
+                    # Start database change monitor
+                    change_monitor = DatabaseChangeMonitor(automation_service, check_interval=30)
+                    app.state.change_monitor = change_monitor
+                    
+                    # Start monitoring in background
+                    monitor_task = asyncio.create_task(change_monitor.start_monitoring())
+                    logger.info("🔍 Database change monitor started (will detect Supabase changes)")
                     
                     logger.info("📊 Checking database for prefixes to automate...")
                     resume_summary = await startup.check_and_resume_automation()
                     
                     if resume_summary['total_prefixes_to_automate'] > 0:
                         logger.info(f"✅ Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
-                        await startup.automation_service.start_sequential_processing(generation_interval=5)
+                        await automation_service.start_sequential_processing(generation_interval=5)
                     else:
-                        logger.info("ℹ️  No prefixes to automate - will check periodically every 5 minutes")
+                        logger.info("ℹ️  No prefixes to automate - monitoring for changes...")
+                        # Keep running - change monitor will restart automation when changes detected
                         while True:
-                            await asyncio.sleep(300)  # Check every 5 minutes
-                            resume_summary = await startup.check_and_resume_automation()
-                            if resume_summary['total_prefixes_to_automate'] > 0:
-                                logger.info(f"✅ Found {resume_summary['total_prefixes_to_automate']} prefixes - starting automation")
-                                await startup.automation_service.start_sequential_processing(generation_interval=5)
+                            await asyncio.sleep(300)  # Check every 5 minutes as backup
+                            if not automation_service.running:
+                                resume_summary = await startup.check_and_resume_automation()
+                                if resume_summary['total_prefixes_to_automate'] > 0:
+                                    logger.info(f"✅ Found {resume_summary['total_prefixes_to_automate']} prefixes - starting automation")
+                                    await automation_service.start_sequential_processing(generation_interval=5)
                 except Exception as e:
                     logger.error(f"❌ Automation error: {e}")
                     import traceback
@@ -130,6 +143,12 @@ async def lifespan(app: FastAPI):
     
     # Cleanup on shutdown (after yield completes)
     logger.info("🛑 Shutting down application...")
+    if hasattr(app.state, 'change_monitor'):
+        try:
+            app.state.change_monitor.stop()
+            logger.info("✅ Change monitor stopped")
+        except Exception as e:
+            logger.warning(f"⚠️  Error stopping change monitor: {e}")
     if hasattr(app.state, 'startup_service'):
         try:
             app.state.startup_service.automation_service.stop()
