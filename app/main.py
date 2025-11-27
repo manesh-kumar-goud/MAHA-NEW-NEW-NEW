@@ -4,23 +4,48 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
-from app.core.config import get_settings
-from app.api.routes import router
-from app.api.automation_routes import router as automation_router
-from app.api.startup_routes import router as startup_router
-from app.models.schemas import ErrorResponse
-
-# Configure logging
+# Configure logging FIRST before any imports that might log
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 logger = logging.getLogger(__name__)
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+# Import with error handling to prevent crashes during module load
+try:
+    from app.core.config import get_settings
+except Exception as e:
+    logger.error(f"Failed to import settings: {e}")
+    get_settings = None
+
+try:
+    from app.api.routes import router
+except Exception as e:
+    logger.error(f"Failed to import routes: {e}")
+    router = None
+
+try:
+    from app.api.automation_routes import router as automation_router
+except Exception as e:
+    logger.error(f"Failed to import automation_routes: {e}")
+    automation_router = None
+
+try:
+    from app.api.startup_routes import router as startup_router
+except Exception as e:
+    logger.error(f"Failed to import startup_routes: {e}")
+    startup_router = None
+
+try:
+    from app.models.schemas import ErrorResponse
+except Exception as e:
+    logger.error(f"Failed to import ErrorResponse: {e}")
+    ErrorResponse = None
 
 
 @asynccontextmanager
@@ -129,19 +154,22 @@ def create_app() -> FastAPI:
     logger.info("=" * 60)
     
     # Get settings with error handling
+    app_name = "SPDCL ID Generator"
+    app_version = "2.0.0"
+    api_prefix = "/api/v1"
+    cors_origins = ["*"]
+    
     try:
-        settings = get_settings()
-        app_name = settings.app_name
-        app_version = settings.app_version
-        api_prefix = settings.api_prefix
-        cors_origins = settings.cors_origins
+        if get_settings:
+            settings = get_settings()
+            app_name = settings.app_name or app_name
+            app_version = settings.app_version or app_version
+            api_prefix = settings.api_prefix or api_prefix
+            cors_origins = settings.cors_origins or cors_origins
     except Exception as e:
         logger.warning(f"⚠️  Could not load all settings (using defaults): {e}")
-        # Use defaults if settings fail to load
-        app_name = "SPDCL ID Generator"
-        app_version = "2.0.0"
-        api_prefix = "/api/v1"
-        cors_origins = ["*"]
+        import traceback
+        logger.debug(traceback.format_exc())
     
     app = FastAPI(
         title=app_name,
@@ -164,16 +192,33 @@ def create_app() -> FastAPI:
     except Exception as e:
         logger.warning(f"⚠️  Could not add CORS middleware: {e}")
     
-    # Include API routes
-    try:
-        app.include_router(router, prefix=api_prefix)
-        app.include_router(automation_router, prefix=api_prefix)
-        app.include_router(startup_router, prefix=api_prefix)
-        logger.info(f"✅ API routes registered at {api_prefix}")
-    except Exception as e:
-        logger.error(f"❌ Could not register all routes: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+    # Include API routes (only if they imported successfully)
+    routes_registered = 0
+    if router:
+        try:
+            app.include_router(router, prefix=api_prefix)
+            routes_registered += 1
+            logger.info(f"✅ Main routes registered at {api_prefix}")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not register main routes: {e}")
+    
+    if automation_router:
+        try:
+            app.include_router(automation_router, prefix=api_prefix)
+            routes_registered += 1
+            logger.info(f"✅ Automation routes registered at {api_prefix}")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not register automation routes: {e}")
+    
+    if startup_router:
+        try:
+            app.include_router(startup_router, prefix=api_prefix)
+            routes_registered += 1
+            logger.info(f"✅ Startup routes registered at {api_prefix}")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not register startup routes: {e}")
+    
+    logger.info(f"✅ Total routes registered: {routes_registered}/3")
     
     # Health check endpoint (for Render free tier - keeps service alive)
     @app.get("/")
@@ -225,19 +270,47 @@ def create_app() -> FastAPI:
             }
         }
     
-    # Exception handlers
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(request, exc):
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=ErrorResponse(
-                error=exc.detail,
-                timestamp=datetime.now(timezone.utc)
-            ).dict()
-        )
+    # Exception handlers (only if ErrorResponse imported successfully)
+    if ErrorResponse:
+        @app.exception_handler(HTTPException)
+        async def http_exception_handler(request, exc):
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=ErrorResponse(
+                    error=exc.detail,
+                    timestamp=datetime.now(timezone.utc)
+                ).dict()
+            )
+    else:
+        @app.exception_handler(HTTPException)
+        async def http_exception_handler(request, exc):
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"error": exc.detail, "timestamp": datetime.now(timezone.utc).isoformat()}
+            )
     
     return app
 
 
-# Create app instance
-app = create_app()
+# Create app instance with error handling
+try:
+    app = create_app()
+    logger.info("✅ App instance created successfully")
+except Exception as e:
+    logger.error(f"❌ CRITICAL: Failed to create app: {e}")
+    import traceback
+    logger.error(traceback.format_exc())
+    # Create minimal app that will at least start
+    import os
+    app = FastAPI(title="SPDCL ID Generator", version="2.0.0")
+    
+    @app.get("/")
+    async def minimal_health():
+        return {
+            "status": "degraded",
+            "message": "App started but some services failed to initialize",
+            "error": str(e),
+            "port": os.getenv("PORT", "8000")
+        }
+    
+    logger.warning("⚠️  Created minimal app - some features may not work")

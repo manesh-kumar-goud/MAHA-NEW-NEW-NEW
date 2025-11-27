@@ -10,9 +10,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings with validation and defaults"""
     
-    # Database
-    supabase_url: str = Field(..., description="Supabase project URL")
-    supabase_anon_key: str = Field(..., description="Supabase anonymous key")
+    # Database - Make optional during startup, validate at runtime
+    supabase_url: Optional[str] = Field(default=None, description="Supabase project URL")
+    supabase_anon_key: Optional[str] = Field(default=None, description="Supabase anonymous key")
     
     # Google Sheets - Both optional, but at least one must be provided (checked at runtime)
     google_service_account_file: Optional[str] = Field(
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
         default=None,
         description="Google service account JSON as string (for Railway/env vars)"
     )
-    google_sheet_id: str = Field(..., description="Google Sheet ID")
+    google_sheet_id: Optional[str] = Field(default=None, description="Google Sheet ID")
     
     # Application settings
     app_name: str = Field(default="SPDCL ID Generator", description="Application name")
@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     @classmethod
     def validate_supabase_url(cls, v):
         """Validate Supabase URL format"""
+        if v is None:
+            return v  # Allow None during startup
         if not v.startswith("https://") or "supabase.co" not in v:
             raise ValueError("Invalid Supabase URL format")
         return v

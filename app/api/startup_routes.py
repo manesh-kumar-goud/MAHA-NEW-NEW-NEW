@@ -101,7 +101,7 @@ async def reset_completed_to_pending():
 async def force_start_automation(prefixes: List[str]):
     """Force start automation for specific prefixes (regardless of status)"""
     
-    from app.services.automation import AutomationService
+    from app.services.automation_new import SequentialAutomationService as AutomationService
     import asyncio
     
     try:

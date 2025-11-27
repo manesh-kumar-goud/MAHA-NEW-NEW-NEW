@@ -7,14 +7,19 @@ from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-from app.services.automation import AutomationService
 from app.models.schemas import HealthResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/automation", tags=["automation"])
 
-# Global automation service instance
-automation_service = AutomationService()
+# Try to import automation service - use the actual service that exists
+try:
+    from app.services.automation_new import SequentialAutomationService
+    automation_service = SequentialAutomationService()
+except ImportError:
+    # Fallback if import fails
+    logger.warning("Could not import SequentialAutomationService - automation routes may not work")
+    automation_service = None
 
 
 class AutomationStartRequest(BaseModel):
@@ -48,6 +53,12 @@ async def start_automation(
 ):
     """Start continuous automation (runs indefinitely until stopped)"""
     
+    if automation_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Automation service is not available"
+        )
+    
     if automation_service.running:
         raise HTTPException(
             status_code=400,
@@ -56,19 +67,18 @@ async def start_automation(
     
     logger.info(f"Starting automation for prefixes: {request.prefixes}")
     
-    # Start automation in background
+    # Start automation in background - SequentialAutomationService uses start_sequential_processing
+    # Note: SequentialAutomationService doesn't support batch_size or specific prefixes in the same way
     background_tasks.add_task(
-        automation_service.start_continuous_generation,
-        request.prefixes,
-        request.generation_interval,
-        request.batch_size
+        automation_service.start_sequential_processing,
+        request.generation_interval
     )
     
     return {
         "message": "Automation started successfully",
         "prefixes": request.prefixes,
         "generation_interval": request.generation_interval,
-        "batch_size": request.batch_size
+        "note": "Sequential automation processes prefixes from database, not from request"
     }
 
 
@@ -79,6 +89,12 @@ async def run_automation(
 ):
     """Run automation for a specific duration"""
     
+    if automation_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Automation service is not available"
+        )
+    
     if automation_service.running:
         raise HTTPException(
             status_code=400,
@@ -87,25 +103,31 @@ async def run_automation(
     
     logger.info(f"Running automation for {request.duration_minutes} minutes")
     
-    # Run automation in background
+    # SequentialAutomationService doesn't have run_for_duration, use start_sequential_processing
+    # Duration control would need to be implemented separately
     background_tasks.add_task(
-        automation_service.run_for_duration,
-        request.prefixes,
-        request.duration_minutes,
+        automation_service.start_sequential_processing,
         request.generation_interval
     )
     
     return {
-        "message": f"Automation will run for {request.duration_minutes} minutes",
+        "message": f"Automation started (duration control not implemented for sequential service)",
         "prefixes": request.prefixes,
         "duration_minutes": request.duration_minutes,
-        "generation_interval": request.generation_interval
+        "generation_interval": request.generation_interval,
+        "note": "Sequential automation will run until stopped manually"
     }
 
 
 @router.post("/stop")
 async def stop_automation():
     """Stop running automation"""
+    
+    if automation_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Automation service is not available"
+        )
     
     if not automation_service.running:
         raise HTTPException(
@@ -125,21 +147,38 @@ async def stop_automation():
 async def get_automation_status():
     """Get current automation status and statistics"""
     
+    if automation_service is None:
+        return AutomationStatsResponse(
+            running=False,
+            total_generated=0,
+            mobile_numbers_found=0,
+            errors=0,
+            runtime_seconds=None,
+            success_rate=0.0
+        )
+    
     stats = automation_service.get_stats()
     
     return AutomationStatsResponse(
-        running=stats["running"],
-        total_generated=stats["total_generated"],
-        mobile_numbers_found=stats["mobile_numbers_found"],
-        errors=stats["errors"],
-        runtime_seconds=stats["runtime_seconds"],
-        success_rate=stats["success_rate"]
+        running=stats.get("running", automation_service.running),
+        total_generated=stats.get("total_generated", 0),
+        mobile_numbers_found=stats.get("mobile_numbers_found", 0),
+        errors=stats.get("errors", 0),
+        runtime_seconds=stats.get("runtime_seconds"),
+        success_rate=stats.get("success_rate", 0.0)
     )
 
 
 @router.get("/health")
 async def automation_health():
     """Check automation service health"""
+    
+    if automation_service is None:
+        return {
+            "status": "unavailable",
+            "automation_running": False,
+            "stats": {}
+        }
     
     return {
         "status": "healthy",
