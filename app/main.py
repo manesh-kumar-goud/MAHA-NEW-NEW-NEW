@@ -52,6 +52,9 @@ except Exception as e:
 async def lifespan(app: FastAPI):
     """Application lifespan events - starts automation in background thread"""
     import os
+    import threading
+    import asyncio
+    import time
     
     # CRITICAL: Yield FIRST to ensure web server starts immediately
     # This is the most important part - Render needs to see the server binding to port
@@ -60,86 +63,79 @@ async def lifespan(app: FastAPI):
     logger.info("🌐 Web server will bind to 0.0.0.0:$PORT")
     logger.info("=" * 60)
     
-    # Yield immediately - this allows the web server to start and bind to port
-    # Render will detect this and mark the service as "live"
-    yield
+    # Start automation thread BEFORE yield (non-blocking, won't block server startup)
+    def run_automation():
+        """Run automation in background thread - completely non-blocking"""
+        try:
+            # Wait to ensure web server is fully started and port is bound
+            logger.info("⏳ Waiting 15 seconds for web server to fully bind to port...")
+            time.sleep(15)
+            
+            logger.info("🔄 Starting background automation...")
+            
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Start automation
+            async def start():
+                try:
+                    from app.services.startup import StartupService
+                    startup = StartupService()
+                    app.state.startup_service = startup
+                    
+                    logger.info("📊 Checking database for prefixes to automate...")
+                    resume_summary = await startup.check_and_resume_automation()
+                    
+                    if resume_summary['total_prefixes_to_automate'] > 0:
+                        logger.info(f"✅ Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
+                        await startup.automation_service.start_sequential_processing(generation_interval=5)
+                    else:
+                        logger.info("ℹ️  No prefixes to automate - will check periodically every 5 minutes")
+                        while True:
+                            await asyncio.sleep(300)  # Check every 5 minutes
+                            resume_summary = await startup.check_and_resume_automation()
+                            if resume_summary['total_prefixes_to_automate'] > 0:
+                                logger.info(f"✅ Found {resume_summary['total_prefixes_to_automate']} prefixes - starting automation")
+                                await startup.automation_service.start_sequential_processing(generation_interval=5)
+                except Exception as e:
+                    logger.error(f"❌ Automation error: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+            
+            loop.run_until_complete(start())
+        except Exception as e:
+            logger.error(f"❌ Failed to start automation thread: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
-    # After yield, try to start background automation (non-blocking)
-    # This won't prevent the web server from starting if it fails
+    # Start automation thread BEFORE yield (non-blocking, daemon thread)
     try:
-        # Only start automation if we're actually running as a server (not during build)
         port = os.getenv("PORT")
         if port is None:
-            logger.info("Running in build/test mode - skipping automation startup")
-            return
-        
-        logger.info("Server mode detected - initializing background automation...")
-        
-        def run_automation():
-            """Run automation in background thread - completely non-blocking"""
-            import asyncio
-            import time
-            
-            try:
-                # Wait to ensure web server is fully started and port is bound
-                logger.info("Waiting 15 seconds for web server to fully bind to port...")
-                time.sleep(15)
-                
-                logger.info("Starting background automation...")
-                
-                # Create new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                # Start automation
-                async def start():
-                    try:
-                        from app.services.startup import StartupService
-                        startup = StartupService()
-                        app.state.startup_service = startup
-                        
-                        resume_summary = await startup.check_and_resume_automation()
-                        if resume_summary['total_prefixes_to_automate'] > 0:
-                            logger.info(f"Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
-                            await startup.automation_service.start_sequential_processing(generation_interval=5)
-                        else:
-                            logger.info("No prefixes to automate - will check periodically")
-                            while True:
-                                await asyncio.sleep(300)
-                                resume_summary = await startup.check_and_resume_automation()
-                                if resume_summary['total_prefixes_to_automate'] > 0:
-                                    logger.info(f"Found {resume_summary['total_prefixes_to_automate']} prefixes - starting automation")
-                                    await startup.automation_service.start_sequential_processing(generation_interval=5)
-                    except Exception as e:
-                        logger.error(f"Automation error: {e}")
-                        import traceback
-                        logger.error(traceback.format_exc())
-                
-                loop.run_until_complete(start())
-            except Exception as e:
-                logger.error(f"Failed to start automation: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-        
-        # Start automation thread (non-blocking, daemon thread)
-        import threading
-        automation_thread = threading.Thread(target=run_automation, daemon=True, name="AutomationThread")
-        automation_thread.start()
-        logger.info("✅ Background automation thread scheduled (will wait 15s before starting)")
-        
+            logger.info("ℹ️  Running in build/test mode - skipping automation startup")
+        else:
+            logger.info("🔧 Server mode detected - scheduling background automation...")
+            automation_thread = threading.Thread(target=run_automation, daemon=True, name="AutomationThread")
+            automation_thread.start()
+            logger.info("✅ Background automation thread started (will begin in 15 seconds)")
     except Exception as e:
-        # If automation setup fails, log but don't crash the web server
-        logger.warning(f"⚠️  Could not start automation (web server will continue): {e}")
+        logger.warning(f"⚠️  Could not start automation thread (web server will continue): {e}")
         import traceback
         logger.debug(traceback.format_exc())
     
+    # Yield - this allows the web server to start and bind to port
+    # Render will detect this and mark the service as "live"
+    yield
+    
     # Cleanup on shutdown (after yield completes)
-    logger.info("Shutting down application...")
+    logger.info("🛑 Shutting down application...")
     if hasattr(app.state, 'startup_service'):
         try:
             app.state.startup_service.automation_service.stop()
-        except:
-            pass
+            logger.info("✅ Automation service stopped")
+        except Exception as e:
+            logger.warning(f"⚠️  Error stopping automation: {e}")
 
 
 def create_app() -> FastAPI:
