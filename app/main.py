@@ -56,20 +56,21 @@ async def lifespan(app: FastAPI):
     import asyncio
     import time
     
-    # CRITICAL: Yield FIRST to ensure web server starts immediately
-    # This is the most important part - Render needs to see the server binding to port
-    logger.info("=" * 60)
-    logger.info("🚀 Starting FastAPI web server...")
-    logger.info("🌐 Web server will bind to 0.0.0.0:$PORT")
-    logger.info("=" * 60)
+    # CRITICAL: Yield IMMEDIATELY - no blocking operations before this!
+    # Render needs to see the server binding to port within the timeout window
+    logger.info("🚀 FastAPI web server starting - binding to port...")
     
-    # Start automation thread BEFORE yield (non-blocking, won't block server startup)
+    # Yield FIRST - this allows the web server to start immediately
+    # Render will detect this and mark the service as "live"
+    yield
+    
+    # Now that server is live, start background automation (non-blocking)
     def run_automation():
         """Run automation in background thread - completely non-blocking"""
         try:
             # Wait to ensure web server is fully started and port is bound
-            logger.info("⏳ Waiting 15 seconds for web server to fully bind to port...")
-            time.sleep(15)
+            logger.info("⏳ Waiting 10 seconds for web server to fully bind to port...")
+            time.sleep(10)
             
             logger.info("🔄 Starting background automation...")
             
@@ -122,7 +123,7 @@ async def lifespan(app: FastAPI):
             import traceback
             logger.error(traceback.format_exc())
     
-    # Start automation thread BEFORE yield (non-blocking, daemon thread)
+    # Start automation thread AFTER yield (non-blocking, daemon thread)
     try:
         port = os.getenv("PORT")
         if port is None:
@@ -131,15 +132,11 @@ async def lifespan(app: FastAPI):
             logger.info("🔧 Server mode detected - scheduling background automation...")
             automation_thread = threading.Thread(target=run_automation, daemon=True, name="AutomationThread")
             automation_thread.start()
-            logger.info("✅ Background automation thread started (will begin in 15 seconds)")
+            logger.info("✅ Background automation thread started (will begin in 10 seconds)")
     except Exception as e:
         logger.warning(f"⚠️  Could not start automation thread (web server will continue): {e}")
         import traceback
         logger.debug(traceback.format_exc())
-    
-    # Yield - this allows the web server to start and bind to port
-    # Render will detect this and mark the service as "live"
-    yield
     
     # Cleanup on shutdown (after yield completes)
     logger.info("🛑 Shutting down application...")
