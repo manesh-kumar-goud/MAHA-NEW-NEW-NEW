@@ -30,6 +30,9 @@ async def main():
     print("SPDCL COMPLETE AUTOMATION SYSTEM")
     print("=" * 60)
     
+    startup_service = None
+    automation_service = None
+    
     try:
         # Import services
         from app.services.startup import StartupService
@@ -77,43 +80,44 @@ async def main():
             print("+ Generating IDs every 5 seconds")
             print("+ Scraping mobile numbers from SPDCL")
             print("+ Logging to Google Sheets (if permissions allow)")
-            print("\nPress Ctrl+C to stop")
+            print("\nSystem will run indefinitely. Press Ctrl+C to stop")
             
-            # Monitor and keep running indefinitely
+            # Monitor and keep running indefinitely (automation already started by check_and_resume_automation)
             iteration = 0
-            while automation_service.running:
+            while True:
                 await asyncio.sleep(30)  # Print stats every 30 seconds
                 iteration += 1
                 
-                stats = automation_service.get_stats()
-                print(f"[{iteration:4d}] Generated: {stats['total_generated']:5d} | "
-                      f"Found: {stats['mobile_numbers_found']:4d} | "
-                      f"Success: {stats['success_rate']:5.1f}% | "
-                      f"Errors: {stats['errors']:3d}")
-                
-                if not automation_service.running:
-                    print("! Automation stopped")
-                    break
-            
-            # Keep running even if automation stops (wait for restart)
-            print("\n+ Automation stopped - waiting for new work...")
-            while True:
-                await asyncio.sleep(60)  # Check every minute for new prefixes
+                if automation_service.running:
+                    stats = automation_service.get_stats()
+                    print(f"[{iteration:4d}] Generated: {stats['total_generated']:5d} | "
+                          f"Found: {stats['mobile_numbers_found']:4d} | "
+                          f"Success: {stats['success_rate']:5.1f}% | "
+                          f"Errors: {stats['errors']:3d}")
+                else:
+                    print(f"[{iteration:4d}] Automation stopped - checking for new work...")
+                    # Check for new prefixes and restart if needed
+                    await asyncio.sleep(60)
+                    resume_summary = await startup_service.check_and_resume_automation()
+                    if resume_summary['total_prefixes_to_automate'] > 0:
+                        print(f"Found {resume_summary['total_prefixes_to_automate']} new prefixes - automation will restart automatically")
             
         else:
             print("\n! No prefixes need automation")
             print("  All prefixes are completed or no work to do")
-            print("  System will keep running and check for new work...")
+            print("  System will keep running and check for new work every 5 minutes...")
             # Keep running and check periodically for new prefixes
             while True:
                 await asyncio.sleep(300)  # Check every 5 minutes for new prefixes
-                print("Checking for new prefixes...")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking for new prefixes...")
                 resume_summary = await startup_service.check_and_resume_automation()
                 if resume_summary['total_prefixes_to_automate'] > 0:
-                    print(f"Found {resume_summary['total_prefixes_to_automate']} new prefixes - restarting automation...")
-                    # Restart automation
-                    await startup_service.check_and_resume_automation()
-                    # Monitor again
+                    print(f"Found {resume_summary['total_prefixes_to_automate']} new prefixes - starting automation...")
+                    # Start automation
+                    automation_task = asyncio.create_task(
+                        automation_service.start_sequential_processing(generation_interval=5)
+                    )
+                    # Monitor while running
                     while automation_service.running:
                         await asyncio.sleep(30)
                         stats = automation_service.get_stats()
@@ -123,18 +127,42 @@ async def main():
         
     except KeyboardInterrupt:
         print("\n! Stopped by user")
+        if automation_service and automation_service.running:
+            automation_service.stop()
     except Exception as e:
-        print(f"\n- Error: {e}")
+        print(f"\n- Error in main loop: {e}")
         import traceback
         traceback.print_exc()
-    finally:
-        # Cleanup
-        try:
-            if 'automation_service' in locals() and automation_service.running:
-                automation_service.stop()
-                print("+ Automation stopped cleanly")
-        except:
-            pass
+        # Don't exit - keep running and retry
+        print("+ Error handled - continuing to run...")
+        await asyncio.sleep(10)
+        # Restart automation if it stopped
+        if automation_service and not automation_service.running:
+            print("+ Attempting to restart automation...")
+            try:
+                if startup_service:
+                    resume_summary = await startup_service.check_and_resume_automation()
+                    if resume_summary['total_prefixes_to_automate'] > 0:
+                        print(f"+ Restarted automation for {resume_summary['total_prefixes_to_automate']} prefixes")
+            except Exception as restart_error:
+                print(f"- Failed to restart: {restart_error}")
+        
+        # Continue running
+        while True:
+            await asyncio.sleep(60)
+            if automation_service and automation_service.running:
+                stats = automation_service.get_stats()
+                print(f"Running: Generated={stats['total_generated']}, Found={stats['mobile_numbers_found']}")
+            else:
+                print("Waiting for work...")
+                try:
+                    if startup_service:
+                        resume_summary = await startup_service.check_and_resume_automation()
+                        if resume_summary['total_prefixes_to_automate'] > 0:
+                            print(f"Found {resume_summary['total_prefixes_to_automate']} prefixes - restarting...")
+                except Exception as e:
+                    print(f"Error checking for work: {e}")
+                    await asyncio.sleep(60)
 
 if __name__ == "__main__":
     try:
