@@ -52,9 +52,12 @@ class SequentialAutomationService:
         logger.info("Max IDs: Calculated from digit count (4 digits = 0000-9999, 5 digits = 00000-99999, etc.)")
         
         try:
+            iteration_count = 0
             while self.running:
+                iteration_count += 1
                 try:
                     # Get the next prefix to process
+                    logger.debug(f"🔄 Automation loop iteration #{iteration_count} - checking for prefixes...")
                     current_prefix = await self._get_next_prefix_to_process()
                     
                     if current_prefix:
@@ -68,6 +71,12 @@ class SequentialAutomationService:
                             current_prefix, 
                             generation_interval
                         )
+                        
+                        # After processing, clear current prefix and continue loop
+                        logger.info(f"✅ Finished processing prefix: {current_prefix}")
+                        logger.info("🔄 Looking for next prefix to process...")
+                        self.current_prefix = None
+                        self.stats["current_prefix"] = None
                         
                     else:
                         logger.info("⏸️  No prefixes to process, waiting...")
@@ -216,12 +225,15 @@ class SequentialAutomationService:
             final_config = self.id_generator.get_prefix_status(prefix)
             if final_config:
                 if final_config.last_number >= max_number:
-                    logger.info(f"Completed prefix {prefix} - reached maximum: {final_config.last_number}/{max_number}")
+                    logger.info(f"✅ Completed prefix {prefix} - reached maximum: {final_config.last_number}/{max_number}")
                     await self._mark_prefix_status(prefix, PrefixStatus.COMPLETED)
+                    logger.info(f"📊 Prefix {prefix} marked as COMPLETED")
                 elif not self.running:
-                    logger.info(f"Processing stopped for {prefix} at {final_config.last_number}")
+                    logger.info(f"⏸️  Processing stopped for {prefix} at {final_config.last_number} (automation stopped)")
+                else:
+                    logger.info(f"📝 Prefix {prefix} processing paused at {final_config.last_number} (will continue in next iteration)")
             else:
-                logger.warning(f"Could not get final status for {prefix}")
+                logger.warning(f"⚠️  Could not get final status for {prefix}")
             
         except Exception as e:
             logger.error(f"Fatal error processing {prefix}: {e}")
