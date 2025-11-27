@@ -25,7 +25,7 @@ class DatabaseChangeMonitor:
         self.automation_service = automation_service
         self.check_interval = check_interval
         self.running = False
-        self.last_pending_count = 0
+        self.last_pending_count = None  # None means not initialized yet
         
     async def start_monitoring(self):
         """Start monitoring database for changes"""
@@ -77,29 +77,35 @@ class DatabaseChangeMonitor:
             }
     
     def _detect_changes(self, current_state: dict) -> bool:
-        """Detect if there are PENDING prefixes to process"""
+        """Detect if there are new PENDING prefixes to process"""
         
-        # Simple check: if there are PENDING prefixes and automation is not running
         pending_count = current_state.get("pending_count", 0)
         
-        # First check - initialize
-        if self.last_pending_count == 0 and pending_count == 0:
-            self.last_pending_count = 0
+        # Initialize on first check
+        if self.last_pending_count is None:
+            self.last_pending_count = pending_count
+            if pending_count > 0:
+                logger.info(f"📊 Found {pending_count} PENDING prefixes (initial check)")
+                return True
             return False
         
-        # If pending count changed or there are pending prefixes and automation not running
-        if pending_count != self.last_pending_count:
-            if pending_count > 0:
-                logger.info(f"📊 Found {pending_count} PENDING prefixes")
-                self.last_pending_count = pending_count
-                return True
-        
-        # Update last known state
-        self.last_pending_count = pending_count
-        
-        # If automation is not running and there are pending prefixes, restart
-        if pending_count > 0 and not self.automation_service.running:
+        # Only restart if:
+        # 1. PENDING count INCREASED (new prefixes added), OR
+        # 2. Automation is not running and there are pending prefixes
+        if pending_count > self.last_pending_count:
+            # New prefixes were added
+            logger.info(f"📊 PENDING count increased: {self.last_pending_count} → {pending_count} (new prefixes detected)")
+            self.last_pending_count = pending_count
             return True
+        
+        # If automation stopped but there are still pending prefixes, restart
+        if pending_count > 0 and not self.automation_service.running:
+            logger.info(f"📊 Automation stopped but {pending_count} PENDING prefixes exist - restarting")
+            self.last_pending_count = pending_count
+            return True
+        
+        # Update last known state (even if count decreased or stayed same)
+        self.last_pending_count = pending_count
         
         return False
     
