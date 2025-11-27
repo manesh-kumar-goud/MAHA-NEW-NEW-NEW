@@ -203,3 +203,41 @@ class GoogleSheetsService:
             return {"error": f"Worksheet '{prefix}' not found"}
         except Exception as e:
             return {"error": str(e)}
+    
+    def ensure_worksheet_exists(self, prefix: str) -> bool:
+        """Ensure a worksheet exists for a prefix (create if it doesn't)"""
+        try:
+            self._get_or_create_worksheet(self.spreadsheet, prefix)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to ensure worksheet exists for {prefix}: {e}")
+            return False
+    
+    def create_worksheets_for_all_prefixes(self, prefixes: list[str]) -> dict:
+        """Create worksheets for all prefixes if they don't exist"""
+        created = []
+        existing = []
+        failed = []
+        
+        for prefix in prefixes:
+            try:
+                # Try to get existing worksheet
+                try:
+                    worksheet = self.spreadsheet.worksheet(prefix)
+                    existing.append(prefix)
+                    logger.info(f"✅ Worksheet already exists: {prefix}")
+                except WorksheetNotFound:
+                    # Create new worksheet
+                    worksheet = self._get_or_create_worksheet(self.spreadsheet, prefix)
+                    created.append(prefix)
+                    logger.info(f"✅ Created worksheet: {prefix}")
+            except Exception as e:
+                failed.append(prefix)
+                logger.error(f"❌ Failed to create worksheet for {prefix}: {e}")
+        
+        return {
+            "created": created,
+            "existing": existing,
+            "failed": failed,
+            "total": len(prefixes)
+        }
