@@ -80,7 +80,17 @@ async def lifespan(app: FastAPI):
                     app.state.startup_service = startup
                     automation_service = startup.automation_service
                     
-                    # Start database change monitor
+                    logger.info("📊 Checking database for prefixes to automate...")
+                    resume_summary = await startup.check_and_resume_automation()
+                    
+                    # Start automation FIRST (before monitor)
+                    if resume_summary['total_prefixes_to_automate'] > 0:
+                        logger.info(f"✅ Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
+                        await automation_service.start_sequential_processing(generation_interval=5)
+                    else:
+                        logger.info("ℹ️  No prefixes to automate - monitoring for changes...")
+                    
+                    # Start database change monitor AFTER automation check (monitor will handle restarts)
                     change_monitor = DatabaseChangeMonitor(automation_service, check_interval=30)
                     app.state.change_monitor = change_monitor
                     
@@ -88,15 +98,8 @@ async def lifespan(app: FastAPI):
                     monitor_task = asyncio.create_task(change_monitor.start_monitoring())
                     logger.info("🔍 Database change monitor started (will detect Supabase changes)")
                     
-                    logger.info("📊 Checking database for prefixes to automate...")
-                    resume_summary = await startup.check_and_resume_automation()
-                    
-                    if resume_summary['total_prefixes_to_automate'] > 0:
-                        logger.info(f"✅ Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
-                        await automation_service.start_sequential_processing(generation_interval=5)
-                    else:
-                        logger.info("ℹ️  No prefixes to automate - monitoring for changes...")
-                        # Keep running - change monitor will restart automation when changes detected
+                    # Keep running - change monitor will restart automation when changes detected
+                    if resume_summary['total_prefixes_to_automate'] == 0:
                         while True:
                             await asyncio.sleep(300)  # Check every 5 minutes as backup
                             if not automation_service.running:

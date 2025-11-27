@@ -32,8 +32,13 @@ class DatabaseChangeMonitor:
         self.running = True
         logger.info(f"🔍 Starting database change monitor (checking every {self.check_interval}s)")
         
-        # Get initial state
-        await self._get_current_state()
+        # Wait a bit before first check to ensure automation has time to start
+        await asyncio.sleep(5)
+        
+        # Get initial state (but don't act on it immediately - let automation start first)
+        initial_state = await self._get_current_state()
+        self.last_pending_count = initial_state.get("pending_count", 0)
+        logger.info(f"📊 Initial state: {self.last_pending_count} PENDING prefixes (monitoring for changes)")
         
         while self.running:
             try:
@@ -84,9 +89,12 @@ class DatabaseChangeMonitor:
         # Initialize on first check
         if self.last_pending_count is None:
             self.last_pending_count = pending_count
-            if pending_count > 0:
-                logger.info(f"📊 Found {pending_count} PENDING prefixes (initial check)")
+            # Only restart on initial check if automation is NOT running and there are pending prefixes
+            if pending_count > 0 and not self.automation_service.running:
+                logger.info(f"📊 Found {pending_count} PENDING prefixes (initial check) - automation not running, will restart")
                 return True
+            elif pending_count > 0:
+                logger.info(f"📊 Found {pending_count} PENDING prefixes (initial check) - automation already running, no restart needed")
             return False
         
         # Only restart if:
