@@ -160,17 +160,17 @@ class GoogleSheetsService:
                 )
                 logger.info(f"✅ Worksheet created: {worksheet_name}")
                 
-            # Add headers
-            headers = ["Serial", "Generated ID", "Mobile Number"]
-            worksheet.append_row(headers, value_input_option="USER_ENTERED")
-            logger.info(f"✅ Headers added: {headers}")
-            
-            # Format headers (make bold)
-            try:
-                worksheet.format("A1:C1", {"textFormat": {"bold": True}})
-                logger.info(f"✅ Headers formatted (bold)")
-            except Exception as format_error:
-                logger.warning(f"⚠️  Could not format headers: {format_error}")
+                # Add headers
+                headers = ["Serial", "Generated ID", "Mobile Number"]
+                worksheet.append_row(headers, value_input_option="USER_ENTERED")
+                logger.info(f"✅ Headers added: {headers}")
+                
+                # Format headers (make bold)
+                try:
+                    worksheet.format("A1:C1", {"textFormat": {"bold": True}})
+                    logger.info(f"✅ Headers formatted (bold)")
+                except Exception as format_error:
+                    logger.warning(f"⚠️  Could not format headers: {format_error}")
                 
                 logger.info(f"✅ Worksheet '{worksheet_name}' ready with headers")
                 return worksheet
