@@ -79,25 +79,47 @@ async def main():
             print("+ Logging to Google Sheets (if permissions allow)")
             print("\nPress Ctrl+C to stop")
             
-            # Monitor for 2 minutes to show it's working
-            for i in range(24):  # 24 * 5 seconds = 2 minutes
-                await asyncio.sleep(5)
+            # Monitor and keep running indefinitely
+            iteration = 0
+            while automation_service.running:
+                await asyncio.sleep(30)  # Print stats every 30 seconds
+                iteration += 1
                 
                 stats = automation_service.get_stats()
-                print(f"[{i+1:2d}/24] Generated: {stats['total_generated']:3d} | "
-                      f"Found: {stats['mobile_numbers_found']:2d} | "
+                print(f"[{iteration:4d}] Generated: {stats['total_generated']:5d} | "
+                      f"Found: {stats['mobile_numbers_found']:4d} | "
                       f"Success: {stats['success_rate']:5.1f}% | "
-                      f"Errors: {stats['errors']:2d}")
+                      f"Errors: {stats['errors']:3d}")
                 
                 if not automation_service.running:
                     print("! Automation stopped")
                     break
             
-            print("\n+ Demo completed - system continues running in background")
+            # Keep running even if automation stops (wait for restart)
+            print("\n+ Automation stopped - waiting for new work...")
+            while True:
+                await asyncio.sleep(60)  # Check every minute for new prefixes
             
         else:
             print("\n! No prefixes need automation")
             print("  All prefixes are completed or no work to do")
+            print("  System will keep running and check for new work...")
+            # Keep running and check periodically for new prefixes
+            while True:
+                await asyncio.sleep(300)  # Check every 5 minutes for new prefixes
+                print("Checking for new prefixes...")
+                resume_summary = await startup_service.check_and_resume_automation()
+                if resume_summary['total_prefixes_to_automate'] > 0:
+                    print(f"Found {resume_summary['total_prefixes_to_automate']} new prefixes - restarting automation...")
+                    # Restart automation
+                    await startup_service.check_and_resume_automation()
+                    # Monitor again
+                    while automation_service.running:
+                        await asyncio.sleep(30)
+                        stats = automation_service.get_stats()
+                        print(f"Generated: {stats['total_generated']:5d} | "
+                              f"Found: {stats['mobile_numbers_found']:4d} | "
+                              f"Success: {stats['success_rate']:5.1f}%")
         
     except KeyboardInterrupt:
         print("\n! Stopped by user")
