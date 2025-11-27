@@ -93,7 +93,7 @@ class SequentialAutomationService:
             logger.info("Sequential processing loop ended")
     
     async def _get_next_prefix_to_process(self) -> Optional[str]:
-        """Get the next prefix to process - PENDING first, then NOT_STARTED"""
+        """Get the next prefix to process - PENDING first, then NOT_STARTED only when all PENDING are done"""
         
         try:
             # PRIORITY 1: Process PENDING prefixes first (complete all pending work)
@@ -101,23 +101,30 @@ class SequentialAutomationService:
             
             if pending_result.data:
                 prefix = pending_result.data[0]["prefix"]
-                logger.info(f"Found PENDING prefix to process: {prefix}")
+                logger.info(f"✅ Found PENDING prefix to process: {prefix}")
                 return prefix
             
-            # PRIORITY 2: If no PENDING, start NOT_STARTED prefixes
-            not_started_result = self.client.table("prefix_metadata").select("prefix").eq("status", PrefixStatus.NOT_STARTED.value).limit(1).execute()
+            # PRIORITY 2: Only if NO PENDING prefixes exist, start NOT_STARTED prefixes
+            # Check if there are any PENDING at all
+            all_pending = self.client.table("prefix_metadata").select("prefix").eq("status", PrefixStatus.PENDING.value).execute()
             
-            if not_started_result.data:
-                prefix = not_started_result.data[0]["prefix"]
-                logger.info(f"Found NOT_STARTED prefix to start: {prefix}")
+            if len(all_pending.data) == 0:
+                # All PENDING are completed, now start NOT_STARTED
+                not_started_result = self.client.table("prefix_metadata").select("prefix").eq("status", PrefixStatus.NOT_STARTED.value).limit(1).execute()
                 
-                # Mark it as PENDING when we start processing
-                self.client.table("prefix_metadata").update({
-                    "status": PrefixStatus.PENDING.value
-                }).eq("prefix", prefix).execute()
-                
-                logger.info(f"Marked {prefix} as PENDING (started processing)")
-                return prefix
+                if not_started_result.data:
+                    prefix = not_started_result.data[0]["prefix"]
+                    logger.info(f"✅ All PENDING completed - Starting NOT_STARTED prefix: {prefix}")
+                    
+                    # Mark it as PENDING when we start processing
+                    self.client.table("prefix_metadata").update({
+                        "status": PrefixStatus.PENDING.value
+                    }).eq("prefix", prefix).execute()
+                    
+                    logger.info(f"✅ Changed {prefix} status: NOT_STARTED → PENDING (now processing)")
+                    return prefix
+            else:
+                logger.debug(f"⏳ Still have {len(all_pending.data)} PENDING prefixes - waiting to complete them first")
             
             # No prefixes to process
             return None

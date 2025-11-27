@@ -111,13 +111,13 @@ class IDGeneratorService:
             
             return PrefixConfig(**updated.data[0])
         else:
-            # Create new
+            # Create new - status should be NOT_STARTED
             new_config = {
                 "prefix": prefix,
                 "digits": digits or 5,
                 "last_number": 1,
                 "has_space": has_space if has_space is not None else True,
-                "status": PrefixStatus.PENDING.value
+                "status": PrefixStatus.NOT_STARTED.value
             }
             
             created = self.client.table(self.table_name).insert(new_config).execute()
