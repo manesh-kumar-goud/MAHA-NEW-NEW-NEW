@@ -27,25 +27,22 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events - starts automation in background thread"""
     settings = get_settings()
-    logger.info("=" * 60)
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
-    logger.info("=" * 60)
     
-    # CRITICAL: Web server must start IMMEDIATELY for Render to detect port
-    # All automation initialization happens in background thread (non-blocking)
+    # CRITICAL: Start automation thread BEFORE yield (non-blocking)
+    # But make it wait before initializing to let web server start first
     
     def run_automation():
         """Run automation in background thread - completely non-blocking"""
         import asyncio
         import time
-        import threading
         
         try:
-            # Wait a few seconds to ensure web server is fully started and port is bound
-            logger.info("Waiting 3 seconds for web server to fully start...")
-            time.sleep(3)
+            # Wait to ensure web server is fully started and port is bound
+            logger.info("Waiting 5 seconds for web server to bind to port...")
+            time.sleep(5)
             
-            logger.info("Starting background automation thread...")
+            logger.info("Starting background automation...")
             
             # Create new event loop for this thread
             loop = asyncio.new_event_loop()
@@ -55,58 +52,43 @@ async def lifespan(app: FastAPI):
             async def start():
                 try:
                     from app.services.startup import StartupService
-                    logger.info("Initializing StartupService...")
                     startup = StartupService()
-                    
-                    # Store reference in app state for health checks
                     app.state.startup_service = startup
                     
-                    logger.info("Checking for prefixes to automate...")
                     resume_summary = await startup.check_and_resume_automation()
                     if resume_summary['total_prefixes_to_automate'] > 0:
-                        logger.info(f"✅ Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
+                        logger.info(f"Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
                         await startup.automation_service.start_sequential_processing(generation_interval=5)
                     else:
-                        logger.info("⏸️  No prefixes to automate - will check periodically")
-                        # Keep checking for new work
+                        logger.info("No prefixes to automate - will check periodically")
                         while True:
-                            await asyncio.sleep(300)  # Check every 5 minutes
+                            await asyncio.sleep(300)
                             resume_summary = await startup.check_and_resume_automation()
                             if resume_summary['total_prefixes_to_automate'] > 0:
-                                logger.info(f"✅ Found {resume_summary['total_prefixes_to_automate']} prefixes - starting automation")
+                                logger.info(f"Found {resume_summary['total_prefixes_to_automate']} prefixes - starting automation")
                                 await startup.automation_service.start_sequential_processing(generation_interval=5)
                 except Exception as e:
-                    logger.error(f"❌ Automation error: {e}")
+                    logger.error(f"Automation error: {e}")
                     import traceback
                     logger.error(traceback.format_exc())
             
             loop.run_until_complete(start())
         except Exception as e:
-            logger.error(f"❌ Failed to start automation thread: {e}")
+            logger.error(f"Failed to start automation: {e}")
             import traceback
             logger.error(traceback.format_exc())
     
-    # Start automation in daemon thread (completely non-blocking)
-    # This will NOT prevent web server from starting
-    try:
-        import threading
-        automation_thread = threading.Thread(target=run_automation, daemon=True, name="AutomationThread")
-        automation_thread.start()
-        logger.info("✅ Background automation thread started (non-blocking)")
-    except Exception as e:
-        logger.warning(f"⚠️  Failed to start automation thread (web server will continue): {e}")
-        # Don't fail startup if automation fails - web server must start
+    # Start thread immediately (non-blocking - won't delay yield)
+    import threading
+    threading.Thread(target=run_automation, daemon=True, name="AutomationThread").start()
+    logger.info("Background automation thread scheduled (non-blocking)")
     
-    # CRITICAL: Log that web server is ready
-    logger.info("=" * 60)
-    logger.info("✅ WEB SERVER IS READY - Render should detect port binding now")
-    logger.info("✅ Health check available at: /")
-    logger.info("=" * 60)
-    
+    # CRITICAL: Yield immediately so web server can start
+    logger.info("Web server ready - Render should detect port binding now")
     yield
     
     # Cleanup on shutdown
-    logger.info("Shutting down application...")
+    logger.info("Shutting down...")
     if hasattr(app.state, 'startup_service'):
         try:
             app.state.startup_service.automation_service.stop()
@@ -116,7 +98,17 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create FastAPI application"""
+    import os
+    
+    # Get settings
     settings = get_settings()
+    
+    # Log port binding info for Render
+    port = os.getenv("PORT", "8000")
+    logger.info("=" * 60)
+    logger.info(f"Creating FastAPI app")
+    logger.info(f"Will bind to: 0.0.0.0:{port}")
+    logger.info("=" * 60)
     
     app = FastAPI(
         title=settings.app_name,
@@ -124,6 +116,8 @@ def create_app() -> FastAPI:
         description="Robust SPDCL ID Generator with scraping and Google Sheets integration",
         lifespan=lifespan
     )
+    
+    logger.info("✅ FastAPI app created - ready to start server")
     
     # CORS middleware
     app.add_middleware(
