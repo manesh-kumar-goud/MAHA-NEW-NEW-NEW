@@ -25,31 +25,61 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan events - starts automation in background"""
+    """Application lifespan events - starts automation in background thread"""
     settings = get_settings()
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     
-    # Start automation service in background
-    import asyncio
+    # Start automation service in background thread (for Render free tier)
+    import threading
     from app.services.startup import StartupService
     
     startup_service = StartupService()
-    automation_task = None
+    automation_thread = None
+    
+    def run_automation():
+        """Run automation in background thread"""
+        import asyncio
+        try:
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Start automation
+            async def start():
+                try:
+                    resume_summary = await startup_service.check_and_resume_automation()
+                    if resume_summary['total_prefixes_to_automate'] > 0:
+                        logger.info(f"Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
+                        await startup_service.automation_service.start_sequential_processing(generation_interval=5)
+                    else:
+                        logger.info("No prefixes to automate - will check periodically")
+                        # Keep checking for new work
+                        while True:
+                            await asyncio.sleep(300)  # Check every 5 minutes
+                            resume_summary = await startup_service.check_and_resume_automation()
+                            if resume_summary['total_prefixes_to_automate'] > 0:
+                                logger.info(f"Found {resume_summary['total_prefixes_to_automate']} prefixes - starting automation")
+                                await startup_service.automation_service.start_sequential_processing(generation_interval=5)
+                except Exception as e:
+                    logger.error(f"Automation error: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+            
+            loop.run_until_complete(start())
+        except Exception as e:
+            logger.error(f"Failed to start automation thread: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     try:
-        # Start automation
-        resume_summary = await startup_service.check_and_resume_automation()
-        if resume_summary['total_prefixes_to_automate'] > 0:
-            logger.info(f"Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
-            automation_task = asyncio.create_task(
-                startup_service.automation_service.start_sequential_processing(generation_interval=5)
-            )
-            # Store reference to prevent garbage collection
-            app.state.automation_task = automation_task
-            app.state.startup_service = startup_service
-        else:
-            logger.info("No prefixes to automate at startup")
-            app.state.startup_service = startup_service
+        # Start automation in daemon thread (dies when main thread dies)
+        automation_thread = threading.Thread(target=run_automation, daemon=True)
+        automation_thread.start()
+        logger.info("Background automation thread started")
+        
+        # Store references
+        app.state.startup_service = startup_service
+        app.state.automation_thread = automation_thread
     except Exception as e:
         logger.error(f"Failed to start automation: {e}")
         import traceback
@@ -59,13 +89,10 @@ async def lifespan(app: FastAPI):
     
     # Cleanup on shutdown
     logger.info("Shutting down application")
-    if automation_task:
-        logger.info("Stopping automation...")
-        startup_service.automation_service.stop()
-        automation_task.cancel()
+    if hasattr(app.state, 'startup_service'):
         try:
-            await automation_task
-        except asyncio.CancelledError:
+            app.state.startup_service.automation_service.stop()
+        except:
             pass
 
 
