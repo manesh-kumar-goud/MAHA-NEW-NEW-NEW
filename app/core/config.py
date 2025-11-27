@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 import os
 
-from pydantic import Field, validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,25 +60,27 @@ class Settings(BaseSettings):
     @model_validator(mode='after')
     def validate_service_account(self):
         """Validate service account - either JSON env var or file must be provided"""
-        # Check if JSON env var is set (even if not in values yet)
-        json_from_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or self.google_service_account_json
+        # Check if JSON env var is set
+        json_from_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+        json_from_field = getattr(self, 'google_service_account_json', None)
         
-        # If JSON is provided, file is not needed
-        if json_from_env:
-            # Clear file path if JSON is provided
-            self.google_service_account_file = None
+        # If JSON is provided via env var or field, file is not needed
+        if json_from_env or json_from_field:
             return self
         
-        # If no JSON, file must exist
-        if not self.google_service_account_file or not Path(self.google_service_account_file).exists():
-            raise ValueError(
-                "Either GOOGLE_SERVICE_ACCOUNT_JSON env var or google_service_account_file must be provided. "
-                f"File not found: {self.google_service_account_file}"
-            )
+        # If no JSON, check if file exists
+        file_path = getattr(self, 'google_service_account_file', None)
+        if file_path and Path(file_path).exists():
+            return self
         
-        return self
+        # Neither JSON nor valid file provided
+        raise ValueError(
+            "Either GOOGLE_SERVICE_ACCOUNT_JSON env var or google_service_account_file must be provided. "
+            f"File path provided: {file_path}"
+        )
     
-    @validator("supabase_url")
+    @field_validator("supabase_url")
+    @classmethod
     def validate_supabase_url(cls, v):
         """Validate Supabase URL format"""
         if not v.startswith("https://") or "supabase.co" not in v:
