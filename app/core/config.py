@@ -1,11 +1,9 @@
 """Application configuration with robust validation"""
 
 from functools import lru_cache
-from pathlib import Path
 from typing import Optional
-import os
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,7 +14,7 @@ class Settings(BaseSettings):
     supabase_url: str = Field(..., description="Supabase project URL")
     supabase_anon_key: str = Field(..., description="Supabase anonymous key")
     
-    # Google Sheets
+    # Google Sheets - Both optional, but at least one must be provided (checked at runtime)
     google_service_account_file: Optional[str] = Field(
         default=None,
         description="Path to Google service account JSON file (optional if GOOGLE_SERVICE_ACCOUNT_JSON is set)"
@@ -56,28 +54,6 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore"
     )
-    
-    @model_validator(mode='after')
-    def validate_service_account(self):
-        """Validate service account - either JSON env var or file must be provided"""
-        # Check if JSON env var is set
-        json_from_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-        json_from_field = getattr(self, 'google_service_account_json', None)
-        
-        # If JSON is provided via env var or field, file is not needed
-        if json_from_env or json_from_field:
-            return self
-        
-        # If no JSON, check if file exists
-        file_path = getattr(self, 'google_service_account_file', None)
-        if file_path and Path(file_path).exists():
-            return self
-        
-        # Neither JSON nor valid file provided
-        raise ValueError(
-            "Either GOOGLE_SERVICE_ACCOUNT_JSON env var or google_service_account_file must be provided. "
-            f"File path provided: {file_path}"
-        )
     
     @field_validator("supabase_url")
     @classmethod

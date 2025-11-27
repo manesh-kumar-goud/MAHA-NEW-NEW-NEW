@@ -1,6 +1,7 @@
 """Google Sheets service with robust error handling"""
 
 import logging
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -26,20 +27,31 @@ class GoogleSheetsService:
         """Lazy-loaded Google Sheets client"""
         if self._client is None:
             try:
+                # Check environment variable first (for Render/Railway)
+                json_from_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+                json_from_settings = self.settings.google_service_account_json
+                
                 # Support Railway/env var JSON (preferred) or file path
-                if self.settings.google_service_account_json:
+                if json_from_env or json_from_settings:
                     import json
-                    import io
-                    service_account_info = json.loads(self.settings.google_service_account_json)
+                    service_account_json = json_from_env or json_from_settings
+                    service_account_info = json.loads(service_account_json)
                     self._client = gspread.service_account_from_dict(service_account_info)
                     logger.info("Google Sheets client initialized from JSON env var")
                 elif self.settings.google_service_account_file:
-                    self._client = gspread.service_account(
-                        filename=self.settings.google_service_account_file
-                    )
-                    logger.info("Google Sheets client initialized from file")
+                    from pathlib import Path
+                    file_path = Path(self.settings.google_service_account_file)
+                    if file_path.exists():
+                        self._client = gspread.service_account(
+                            filename=str(file_path)
+                        )
+                        logger.info("Google Sheets client initialized from file")
+                    else:
+                        raise ValueError(f"Service account file not found: {file_path}")
                 else:
-                    raise ValueError("Either google_service_account_json or google_service_account_file must be provided")
+                    raise ValueError(
+                        "Either GOOGLE_SERVICE_ACCOUNT_JSON env var or google_service_account_file must be provided"
+                    )
             except Exception as e:
                 logger.error(f"Failed to initialize Google Sheets client: {e}")
                 raise
