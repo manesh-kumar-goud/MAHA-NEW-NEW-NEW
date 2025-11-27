@@ -14,7 +14,7 @@ RETURNS TABLE (
     last_number integer,
     has_space boolean,
     status text,
-    last_extracted text,
+    remarks text,
     created_at timestamptz,
     updated_at timestamptz
 )
@@ -26,8 +26,8 @@ DECLARE
 BEGIN
     -- Get current record
     SELECT * INTO v_current_record
-    FROM public.prefix_metadata
-    WHERE prefix = p_prefix
+    FROM public.prefix_metadata pm
+    WHERE pm.prefix = p_prefix
     FOR UPDATE;
     
     -- If not exists, create it
@@ -51,21 +51,21 @@ BEGIN
         has_space = COALESCE(p_has_space, v_current_record.has_space),
         status = 'pending',  -- Always use 'pending', never 'running'
         updated_at = NOW()
-    WHERE prefix = p_prefix;
+    WHERE public.prefix_metadata.prefix = p_prefix;
     
     -- Return updated record
     RETURN QUERY
     SELECT 
-        v_current_record.prefix,
+        pm.prefix,
         COALESCE(p_digits, v_current_record.digits),
         v_new_number,
         COALESCE(p_has_space, v_current_record.has_space),
         'pending'::text,  -- Always return 'pending'
-        v_current_record.last_extracted,
-        v_current_record.created_at,
+        pm.remarks,
+        pm.created_at,
         NOW()
-    FROM public.prefix_metadata
-    WHERE prefix = p_prefix;
+    FROM public.prefix_metadata pm
+    WHERE pm.prefix = p_prefix;
 END;
 $$;
 
