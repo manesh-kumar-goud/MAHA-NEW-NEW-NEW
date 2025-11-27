@@ -26,11 +26,25 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events - starts automation in background thread"""
-    settings = get_settings()
-    logger.info(f"Starting {settings.app_name} v{settings.app_version}")
+    import os
     
-    # CRITICAL: Start automation thread BEFORE yield (non-blocking)
-    # But make it wait before initializing to let web server start first
+    # Only start automation if we're actually running as a server (not during build)
+    # Check if PORT env var exists (Render sets this)
+    is_running_as_server = os.getenv("PORT") is not None
+    
+    if not is_running_as_server:
+        logger.info("Running in build/test mode - skipping automation startup")
+        yield
+        return
+    
+    settings = get_settings()
+    logger.info("=" * 60)
+    logger.info(f"Starting {settings.app_name} v{settings.app_version}")
+    logger.info("Server mode detected - initializing automation")
+    logger.info("=" * 60)
+    
+    # CRITICAL: Start automation thread AFTER yield (when server is actually running)
+    # This ensures web server binds to port first
     
     def run_automation():
         """Run automation in background thread - completely non-blocking"""
@@ -39,8 +53,8 @@ async def lifespan(app: FastAPI):
         
         try:
             # Wait to ensure web server is fully started and port is bound
-            logger.info("Waiting 5 seconds for web server to bind to port...")
-            time.sleep(5)
+            logger.info("Waiting 10 seconds for web server to fully bind to port...")
+            time.sleep(10)
             
             logger.info("Starting background automation...")
             
@@ -78,17 +92,19 @@ async def lifespan(app: FastAPI):
             import traceback
             logger.error(traceback.format_exc())
     
-    # Start thread immediately (non-blocking - won't delay yield)
+    # Start automation thread BEFORE yield (non-blocking)
+    # Thread will wait 10 seconds before starting, giving server time to bind
     import threading
-    threading.Thread(target=run_automation, daemon=True, name="AutomationThread").start()
-    logger.info("Background automation thread scheduled (non-blocking)")
+    automation_thread = threading.Thread(target=run_automation, daemon=True, name="AutomationThread")
+    automation_thread.start()
+    logger.info("Background automation thread scheduled (will wait 10s before starting)")
     
-    # CRITICAL: Yield immediately so web server can start
-    logger.info("Web server ready - Render should detect port binding now")
+    # CRITICAL: Yield immediately so web server can start and bind to port
+    logger.info("Web server starting - Render should detect port binding now")
     yield
     
-    # Cleanup on shutdown
-    logger.info("Shutting down...")
+    # Cleanup on shutdown (after yield completes)
+    logger.info("Shutting down application...")
     if hasattr(app.state, 'startup_service'):
         try:
             app.state.startup_service.automation_service.stop()
