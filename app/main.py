@@ -236,21 +236,11 @@ def create_app() -> FastAPI:
     @app.get("/")
     async def health_check():
         """Health check endpoint - keeps service alive on Render free tier"""
-        # Simple response - don't access automation service to avoid errors
-        try:
-            settings = get_settings()
-            service_name = settings.app_name
-            service_version = settings.app_version
-        except:
-            service_name = "SPDCL ID Generator"
-            service_version = "2.0.0"
-        
+        # Ultra-simple response - no imports, no settings access, instant response
         return {
             "status": "live",
-            "service": service_name,
-            "version": service_version,
-            "message": "Web server is running",
-            "port": os.getenv("PORT", "8000")
+            "service": "SPDCL ID Generator",
+            "version": "2.0.0"
         }
     
     @app.get("/health")
