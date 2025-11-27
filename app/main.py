@@ -56,15 +56,7 @@ async def lifespan(app: FastAPI):
     import asyncio
     import time
     
-    # CRITICAL: Yield IMMEDIATELY - no blocking operations before this!
-    # Render needs to see the server binding to port within the timeout window
-    logger.info("🚀 FastAPI web server starting - binding to port...")
-    
-    # Yield FIRST - this allows the web server to start immediately
-    # Render will detect this and mark the service as "live"
-    yield
-    
-    # Now that server is live, start background automation (non-blocking)
+    # Define automation function BEFORE yield (but don't start it yet)
     def run_automation():
         """Run automation in background thread - completely non-blocking"""
         try:
@@ -123,7 +115,8 @@ async def lifespan(app: FastAPI):
             import traceback
             logger.error(traceback.format_exc())
     
-    # Start automation thread AFTER yield (non-blocking, daemon thread)
+    # Start automation thread BEFORE yield (non-blocking, daemon thread)
+    # This schedules it to start, but doesn't block server startup
     try:
         port = os.getenv("PORT")
         if port is None:
@@ -137,6 +130,11 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  Could not start automation thread (web server will continue): {e}")
         import traceback
         logger.debug(traceback.format_exc())
+    
+    # CRITICAL: Yield NOW - this allows the web server to start immediately
+    # Render will detect this and mark the service as "live"
+    logger.info("🚀 FastAPI web server starting - binding to port...")
+    yield
     
     # Cleanup on shutdown (after yield completes)
     logger.info("🛑 Shutting down application...")
