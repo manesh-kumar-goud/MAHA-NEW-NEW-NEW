@@ -15,4 +15,7 @@ services:
         sync: false
       - key: GOOGLE_SERVICE_ACCOUNT_JSON
         sync: false
+      # Optional: Set your Render service URL for better keep-alive (e.g., https://your-service.onrender.com)
+      # - key: RENDER_EXTERNAL_URL
+      #   value: https://your-service-name.onrender.com
 

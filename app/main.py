@@ -12,9 +12,80 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+
+async def _keep_alive_service():
+    """
+    Keep-alive service to prevent Render free tier from shutting down the service.
+    Uses multiple strategies:
+    1. Internal ping every 5 minutes (may not count as external traffic)
+    2. If RENDER_EXTERNAL_URL is set, pings external URL (counts as external traffic)
+    
+    For best results on free tier, also set up external ping service (see KEEP_ALIVE_SETUP.md)
+    """
+    import os
+    import asyncio
+    import httpx
+    
+    # Wait a bit before first ping to ensure server is fully started
+    await asyncio.sleep(30)
+    
+    # Try to get external URL from environment (Render sets this)
+    external_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("RENDER_SERVICE_URL")
+    
+    # Get the port and construct URLs
+    port = os.getenv("PORT", "8000")
+    local_url = f"http://localhost:{port}/"
+    
+    # Use external URL if available, otherwise use localhost
+    health_url = external_url if external_url else local_url
+    
+    if external_url:
+        logger.info(f"💓 Keep-alive service initialized (will ping EXTERNAL URL {health_url} every 5 minutes)")
+        logger.info("✅ Using external URL - this counts as external traffic and prevents shutdown!")
+    else:
+        logger.info(f"💓 Keep-alive service initialized (will ping {health_url} every 5 minutes)")
+        logger.warning("⚠️  No external URL found - internal pings may not prevent shutdown")
+        logger.info("📖 See KEEP_ALIVE_SETUP.md for setting up external ping service (FREE)")
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        ping_count = 0
+        while True:
+            try:
+                # Ping every 5 minutes (300 seconds) - well under Render's 15min timeout
+                await asyncio.sleep(300)
+                ping_count += 1
+                
+                # Ping the health endpoint
+                try:
+                    response = await client.get(health_url, follow_redirects=True)
+                    if response.status_code == 200:
+                        logger.info(f"💓 Keep-alive ping #{ping_count} successful - service remains active")
+                    else:
+                        logger.warning(f"💓 Keep-alive ping #{ping_count} returned status {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"💓 Keep-alive ping #{ping_count} failed: {e} (service may still be running)")
+                    # If external URL fails, try localhost as fallback
+                    if external_url and ping_count % 3 == 0:  # Every 3rd failed ping, try localhost
+                        try:
+                            response = await client.get(local_url, timeout=5.0)
+                            if response.status_code == 200:
+                                logger.info(f"💓 Fallback localhost ping successful")
+                        except:
+                            pass
+                    
+            except asyncio.CancelledError:
+                logger.info("💓 Keep-alive service cancelled")
+                break
+            except Exception as e:
+                logger.error(f"💓 Keep-alive service error: {e}")
+                # Continue running even if there's an error
+                await asyncio.sleep(60)  # Wait 1 minute before retrying
+
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import httpx
 
 # Import with error handling to prevent crashes during module load
 try:
@@ -97,6 +168,13 @@ async def lifespan(app: FastAPI):
                     # Start monitoring in background
                     monitor_task = asyncio.create_task(change_monitor.start_monitoring())
                     logger.info("🔍 Database change monitor started (will detect Supabase changes)")
+                    
+                    # Start keep-alive service to prevent Render free tier shutdown
+                    # Note: Render free tier shuts down after 15 minutes of inactivity
+                    # This service pings the health endpoint every 5 minutes to keep it active
+                    # For best results, also set up external ping service (see KEEP_ALIVE_SETUP.md)
+                    keep_alive_task = asyncio.create_task(_keep_alive_service())
+                    logger.info("💓 Keep-alive service started (pings health endpoint every 5 minutes)")
                     
                     # Keep running - change monitor will restart automation when changes detected
                     if resume_summary['total_prefixes_to_automate'] == 0:
