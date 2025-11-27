@@ -27,19 +27,26 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events - starts automation in background thread"""
     settings = get_settings()
+    logger.info("=" * 60)
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
+    logger.info("=" * 60)
     
-    # Start automation service in background thread (for Render free tier)
-    import threading
-    from app.services.startup import StartupService
-    
-    startup_service = StartupService()
-    automation_thread = None
+    # CRITICAL: Web server must start IMMEDIATELY for Render to detect port
+    # All automation initialization happens in background thread (non-blocking)
     
     def run_automation():
-        """Run automation in background thread"""
+        """Run automation in background thread - completely non-blocking"""
         import asyncio
+        import time
+        import threading
+        
         try:
+            # Wait a few seconds to ensure web server is fully started and port is bound
+            logger.info("Waiting 3 seconds for web server to fully start...")
+            time.sleep(3)
+            
+            logger.info("Starting background automation thread...")
+            
             # Create new event loop for this thread
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -47,48 +54,59 @@ async def lifespan(app: FastAPI):
             # Start automation
             async def start():
                 try:
-                    resume_summary = await startup_service.check_and_resume_automation()
+                    from app.services.startup import StartupService
+                    logger.info("Initializing StartupService...")
+                    startup = StartupService()
+                    
+                    # Store reference in app state for health checks
+                    app.state.startup_service = startup
+                    
+                    logger.info("Checking for prefixes to automate...")
+                    resume_summary = await startup.check_and_resume_automation()
                     if resume_summary['total_prefixes_to_automate'] > 0:
-                        logger.info(f"Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
-                        await startup_service.automation_service.start_sequential_processing(generation_interval=5)
+                        logger.info(f"✅ Starting automation for {resume_summary['total_prefixes_to_automate']} prefixes")
+                        await startup.automation_service.start_sequential_processing(generation_interval=5)
                     else:
-                        logger.info("No prefixes to automate - will check periodically")
+                        logger.info("⏸️  No prefixes to automate - will check periodically")
                         # Keep checking for new work
                         while True:
                             await asyncio.sleep(300)  # Check every 5 minutes
-                            resume_summary = await startup_service.check_and_resume_automation()
+                            resume_summary = await startup.check_and_resume_automation()
                             if resume_summary['total_prefixes_to_automate'] > 0:
-                                logger.info(f"Found {resume_summary['total_prefixes_to_automate']} prefixes - starting automation")
-                                await startup_service.automation_service.start_sequential_processing(generation_interval=5)
+                                logger.info(f"✅ Found {resume_summary['total_prefixes_to_automate']} prefixes - starting automation")
+                                await startup.automation_service.start_sequential_processing(generation_interval=5)
                 except Exception as e:
-                    logger.error(f"Automation error: {e}")
+                    logger.error(f"❌ Automation error: {e}")
                     import traceback
                     logger.error(traceback.format_exc())
             
             loop.run_until_complete(start())
         except Exception as e:
-            logger.error(f"Failed to start automation thread: {e}")
+            logger.error(f"❌ Failed to start automation thread: {e}")
             import traceback
             logger.error(traceback.format_exc())
     
+    # Start automation in daemon thread (completely non-blocking)
+    # This will NOT prevent web server from starting
     try:
-        # Start automation in daemon thread (dies when main thread dies)
-        automation_thread = threading.Thread(target=run_automation, daemon=True)
+        import threading
+        automation_thread = threading.Thread(target=run_automation, daemon=True, name="AutomationThread")
         automation_thread.start()
-        logger.info("Background automation thread started")
-        
-        # Store references
-        app.state.startup_service = startup_service
-        app.state.automation_thread = automation_thread
+        logger.info("✅ Background automation thread started (non-blocking)")
     except Exception as e:
-        logger.error(f"Failed to start automation: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+        logger.warning(f"⚠️  Failed to start automation thread (web server will continue): {e}")
+        # Don't fail startup if automation fails - web server must start
+    
+    # CRITICAL: Log that web server is ready
+    logger.info("=" * 60)
+    logger.info("✅ WEB SERVER IS READY - Render should detect port binding now")
+    logger.info("✅ Health check available at: /")
+    logger.info("=" * 60)
     
     yield
     
     # Cleanup on shutdown
-    logger.info("Shutting down application")
+    logger.info("Shutting down application...")
     if hasattr(app.state, 'startup_service'):
         try:
             app.state.startup_service.automation_service.stop()
@@ -125,12 +143,24 @@ def create_app() -> FastAPI:
     @app.get("/")
     async def health_check():
         """Health check endpoint - keeps service alive on Render free tier"""
+        # Simple response - don't access automation service to avoid errors
+        return {
+            "status": "live",
+            "service": settings.app_name,
+            "version": settings.app_version,
+            "message": "Web server is running"
+        }
+    
+    @app.get("/health")
+    async def detailed_health():
+        """Detailed health check with automation stats"""
         stats = {}
-        if hasattr(app.state, 'startup_service'):
-            try:
+        try:
+            # Try to get automation stats if available
+            if hasattr(app.state, 'startup_service'):
                 stats = app.state.startup_service.automation_service.get_stats()
-            except:
-                pass
+        except:
+            pass
         return {
             "status": "running",
             "service": settings.app_name,
